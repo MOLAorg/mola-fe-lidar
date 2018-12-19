@@ -57,6 +57,7 @@ class LidarICP : public FrontEndBase
         mrpt::maps::CPointsMap::Ptr last_points{};
         CObservation::Ptr           last_obs{};
         mrpt::slam::CICP            mrpt_icp;
+        mrpt::math::TTwist3D        last_iter_twist;
     };
 
     MethodState state_;
