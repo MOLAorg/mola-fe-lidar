@@ -17,6 +17,7 @@
  */
 
 #include <mola-fe-lidar-icp/LidarICP.h>
+#include <mrpt/core/initializer.h>
 #include <mrpt/maps/CSimplePointsMap.h>
 #include <mrpt/poses/CPose3DPDFGaussian.h>
 #include <mrpt/system/datetime.h>
@@ -24,7 +25,7 @@
 
 using namespace mola;
 
-MOLA_REGISTER_FRONTEND(LidarICP)
+MRPT_INITIALIZER(do_register){MOLA_REGISTER_MODULE(LidarICP)}
 
 LidarICP::LidarICP() = default;
 
@@ -36,7 +37,7 @@ void LidarICP::initialize(const std::string& cfg_block)
     // Default params:
     params_.mrpt_icp.corresponding_points_decimation = 20;
     params_.mrpt_icp.maxIterations                   = 50;
-    params_.mrpt_icp.skip_cov_calculation            = true;
+    params_.mrpt_icp.skip_cov_calculation            = false;
     params_.mrpt_icp.thresholdDist                   = 1.25;
     params_.mrpt_icp.thresholdAng                    = mrpt::DEG2RAD(1.0);
     params_.mrpt_icp.ALFA                            = 0.01;
