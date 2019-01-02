@@ -37,8 +37,18 @@ class LidarICP : public FrontEndBase
 
     struct Parameters
     {
-        /** Minimum time (seconds) between scans for  */
+        /** Minimum time (seconds) between scans for being attempted to be
+         * aligned. Scans faster than this rate will be just silently ignored.
+         */
         double min_time_between_scans_{0.2};
+
+        /** Minimum Euclidean distance (x,y,z) between keyframes inserted into
+         * the map [meters]. */
+        double min_dist_xyz_between_keyframes{1.0};
+
+        /** Minimum ICP "goodness" (in the range [0,1]) for a new KeyFrame to be
+         * accepted. */
+        double min_icp_goodness{0.6};
 
         mrpt::slam::CICP::TConfigParams mrpt_icp{};
     };
@@ -58,6 +68,8 @@ class LidarICP : public FrontEndBase
         CObservation::Ptr           last_obs{};
         mrpt::slam::CICP            mrpt_icp;
         mrpt::math::TTwist3D        last_iter_twist;
+        id_t                        last_kf{mola::INVALID_ID};
+        mrpt::poses::CPose3D        accum_since_last_kf{};
     };
 
     MethodState state_;

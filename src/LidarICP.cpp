@@ -80,86 +80,135 @@ void LidarICP::onNewObservation(CObservation::Ptr& o)
 // here happens the main stuff:
 void LidarICP::doProcessNewObservation(CObservation::Ptr& o)
 {
-    MRPT_TRY_START
-    ASSERT_(o);
-
-    ProfilerEntry tleg(profiler_, "doProcessNewObservation");
-
-    // Only process pointclouds that are sufficiently apart in time:
-    const auto this_obs_tim = o->timestamp;
-    if (state_.last_obs_tim != mrpt::Clock::time_point() &&
-        mrpt::system::timeDifference(state_.last_obs_tim, this_obs_tim) <
-            params_.min_time_between_scans_)
+    // All methods that are enqueued into a thread pool should have its own
+    // top-level try-catch:
+    try
     {
-        // Drop observation.
-        return;
+        ASSERT_(o);
+
+        ProfilerEntry tleg(profiler_, "doProcessNewObservation");
+
+        // Only process pointclouds that are sufficiently apart in time:
+        const auto this_obs_tim = o->timestamp;
+        if (state_.last_obs_tim != mrpt::Clock::time_point() &&
+            mrpt::system::timeDifference(state_.last_obs_tim, this_obs_tim) <
+                params_.min_time_between_scans_)
+        {
+            // Drop observation.
+            return;
+        }
+
+        profiler_.enter("doProcessNewObservation.obs2pointcloud");
+
+        auto       this_obs_points = mrpt::maps::CSimplePointsMap::Create();
+        const bool have_points     = this_obs_points->insertObservationPtr(o);
+
+        profiler_.leave("doProcessNewObservation.obs2pointcloud");
+
+        // Store for next step:
+        auto last_obs_tim   = state_.last_obs_tim;
+        auto last_obs       = state_.last_obs;
+        auto last_points    = state_.last_points;
+        state_.last_obs     = o;
+        state_.last_obs_tim = this_obs_tim;
+        state_.last_points  = this_obs_points;
+
+        // First time we cannot do ICP since we need at least two pointclouds:
+        if (!last_points)
+        {
+            MRPT_LOG_DEBUG("First pointcloud: skipping ICP.");
+            return;
+        }
+
+        if (!have_points)
+        {
+            MRPT_LOG_WARN_STREAM(
+                "Observation of type `" << o->GetRuntimeClass()->className
+                                        << "` could not be converted into a "
+                                           "pointcloud. Doing nothing.");
+            return;
+        }
+
+        // Register point clouds using any of the available ICP algorithms:
+        mrpt::poses::CPose3DPDFGaussian initial_guess;
+        // Use velocity model for the initial guess:
+        double dt = .0;
+        if (last_obs_tim != mrpt::Clock::time_point())
+            dt = mrpt::system::timeDifference(last_obs_tim, this_obs_tim);
+        initial_guess.mean.setFromValues(
+            state_.last_iter_twist.vx * dt, state_.last_iter_twist.vy * dt,
+            state_.last_iter_twist.vz * dt);
+        MRPT_TODO("do omega_xyz part!");
+
+        mrpt::slam::CICP::TReturnInfo ret_info;
+        // Call ICP:
+        state_.mrpt_icp.options = params_.mrpt_icp;
+        auto rel_pose_pdf       = state_.mrpt_icp.Align3DPDF(
+            last_points.get(), this_obs_points.get(), initial_guess,
+            nullptr /*running_time*/, &ret_info);
+
+        const mrpt::poses::CPose3D rel_pose = rel_pose_pdf->getMeanVal();
+
+        // Update velocity model:
+        state_.last_iter_twist.vx = rel_pose.x() / dt;
+        state_.last_iter_twist.vy = rel_pose.y() / dt;
+        state_.last_iter_twist.vz = rel_pose.z() / dt;
+        MRPT_TODO("do omega_xyz part!");
+
+        const double icp_goodness = ret_info.goodness;
+        MRPT_LOG_DEBUG_FMT(
+            "MRPT ICP: goodness=%.03f iters=%u", ret_info.goodness,
+            ret_info.nIterations);
+
+        MRPT_LOG_DEBUG_STREAM("ICP rel_pose=" << rel_pose.asString());
+        MRPT_LOG_DEBUG_STREAM(
+            "Est.twist=" << state_.last_iter_twist.asString());
+        MRPT_LOG_DEBUG_STREAM(
+            "Time since last scan=" << mrpt::system::formatTimeInterval(dt));
+
+        // Create a new KF if the distance since the last one is large enough:
+        state_.accum_since_last_kf = state_.accum_since_last_kf + rel_pose;
+        const double dist_eucl_since_last = state_.accum_since_last_kf.norm();
+        MRPT_TODO("Add rotation threshold");
+
+        MRPT_LOG_DEBUG_FMT(
+            "Since last KF: dist=%5.03f m", dist_eucl_since_last);
+
+        if (icp_goodness > params_.min_icp_goodness &&
+            (state_.last_kf == mola::INVALID_ID ||
+             dist_eucl_since_last > params_.min_dist_xyz_between_keyframes))
+        {
+            // Yes: create new KF
+            // 1) New KeyFrame
+            BackEndBase::ProposeKF_Input  kf;
+            BackEndBase::ProposeKF_Output kf_out;
+
+            kf.timestamp = this_obs_tim;
+            {
+                mrpt::obs::CSensoryFrame sf;
+                sf.push_back(o);
+                kf.observations = std::move(sf);
+            }
+
+            slam_backend_->onProposeNewKeyFrame(kf, kf_out);
+
+            ASSERT_(kf_out.success);
+            ASSERT_(kf_out.new_kf_id != mola::INVALID_ID);
+
+            // 2) New SE(3) constraint between consecutive Keyframes:
+            MRPT_TODO("Continue here!");
+
+            MRPT_LOG_INFO_STREAM(
+                "New KF: ID=" << kf_out.new_kf_id.value() << " rel_pose="
+                              << state_.accum_since_last_kf.asString());
+
+            // Reset accumulators:
+            state_.accum_since_last_kf = mrpt::poses::CPose3D();
+            state_.last_kf             = kf_out.new_kf_id.value();
+        }
     }
-
-    profiler_.enter("doProcessNewObservation.obs2pointcloud");
-
-    auto       this_obs_points = mrpt::maps::CSimplePointsMap::Create();
-    const bool have_points     = this_obs_points->insertObservationPtr(o);
-
-    profiler_.leave("doProcessNewObservation.obs2pointcloud");
-
-    // Store for next step:
-    auto last_obs_tim   = state_.last_obs_tim;
-    auto last_obs       = state_.last_obs;
-    auto last_points    = state_.last_points;
-    state_.last_obs     = o;
-    state_.last_obs_tim = this_obs_tim;
-    state_.last_points  = this_obs_points;
-
-    // First time we cannot do ICP since we need at least two pointclouds:
-    if (!last_points)
+    catch (const std::exception& e)
     {
-        MRPT_LOG_DEBUG("First pointcloud: skipping ICP.");
-        return;
+        MRPT_LOG_ERROR_STREAM("Exception:\n" << mrpt::exception_to_str(e));
     }
-
-    if (!have_points)
-    {
-        MRPT_LOG_WARN_STREAM(
-            "Observation of type `"
-            << o->GetRuntimeClass()->className
-            << "` could not be converted into a pointcloud. Doing nothing.");
-        return;
-    }
-
-    // Register point clouds using any of the available ICP algorithms:
-    mrpt::poses::CPose3DPDFGaussian initial_guess;
-    // Use velocity model for the initial guess:
-    double dt = .0;
-    if (last_obs_tim != mrpt::Clock::time_point())
-        dt = mrpt::system::timeDifference(last_obs_tim, this_obs_tim);
-    initial_guess.mean.setFromValues(
-        state_.last_iter_twist.vx * dt, state_.last_iter_twist.vy * dt,
-        state_.last_iter_twist.vz * dt);
-    MRPT_TODO("do omega_xyz part!");
-
-    mrpt::slam::CICP::TReturnInfo ret_info;
-    // Call ICP:
-    state_.mrpt_icp.options = params_.mrpt_icp;
-    auto rel_pose_pdf       = state_.mrpt_icp.Align3DPDF(
-        last_points.get(), this_obs_points.get(), initial_guess,
-        nullptr /*running_time*/, &ret_info);
-
-    const mrpt::poses::CPose3D rel_pose = rel_pose_pdf->getMeanVal();
-
-    // Update velocity model:
-    state_.last_iter_twist.vx = rel_pose.x() / dt;
-    state_.last_iter_twist.vy = rel_pose.y() / dt;
-    state_.last_iter_twist.vz = rel_pose.z() / dt;
-    MRPT_TODO("do omega_xyz part!");
-
-    MRPT_LOG_DEBUG_FMT(
-        "MRPT ICP: goodness=%.03f iters=%u", ret_info.goodness,
-        ret_info.nIterations);
-
-    MRPT_LOG_DEBUG_STREAM("ICP rel_pose=" << rel_pose.asString());
-    MRPT_LOG_DEBUG_STREAM("Est.twist=" << state_.last_iter_twist.asString());
-    MRPT_LOG_DEBUG_STREAM(
-        "Time since last scan=" << mrpt::system::formatTimeInterval(dt));
-
-    MRPT_TRY_END
 }
