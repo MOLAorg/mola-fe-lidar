@@ -214,8 +214,7 @@ void LidarICP::doProcessNewObservation(CObservation::Ptr& o)
         {
             // Yes: create new KF
             // 1) New KeyFrame
-            BackEndBase::ProposeKF_Input  kf;
-            BackEndBase::ProposeKF_Output kf_out;
+            BackEndBase::ProposeKF_Input kf;
 
             kf.timestamp = this_obs_tim;
             {
@@ -224,7 +223,11 @@ void LidarICP::doProcessNewObservation(CObservation::Ptr& o)
                 kf.observations = std::move(sf);
             }
 
-            slam_backend_->onProposeNewKeyFrame(kf, kf_out);
+            std::future<BackEndBase::ProposeKF_Output> kf_out_fut;
+            kf_out_fut = slam_backend_->onProposeNewKeyFrame(kf);
+
+            // Wait until it's executed:
+            auto kf_out = kf_out_fut.get();
 
             ASSERT_(kf_out.success);
             ASSERT_(kf_out.new_kf_id != mola::INVALID_ID);
