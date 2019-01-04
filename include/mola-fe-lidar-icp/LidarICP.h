@@ -40,7 +40,7 @@ class LidarICP : public FrontEndBase
         /** Minimum time (seconds) between scans for being attempted to be
          * aligned. Scans faster than this rate will be just silently ignored.
          */
-        double min_time_between_scans_{0.2};
+        double min_time_between_scans{0.2};
 
         /** Minimum Euclidean distance (x,y,z) between keyframes inserted into
          * the map [meters]. */
@@ -49,6 +49,10 @@ class LidarICP : public FrontEndBase
         /** Minimum ICP "goodness" (in the range [0,1]) for a new KeyFrame to be
          * accepted. */
         double min_icp_goodness{0.6};
+
+        /** If !=0, decimate point clouds so they do not have more than this
+         * number of points */
+        unsigned int decimate_to_point_count{500};
 
         mrpt::slam::CICP::TConfigParams mrpt_icp{};
     };

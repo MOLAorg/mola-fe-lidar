@@ -17,6 +17,7 @@
  */
 
 #include <mola-fe-lidar-icp/LidarICP.h>
+#include <mola-kernel/yaml_helpers.h>
 #include <mrpt/core/initializer.h>
 #include <mrpt/maps/CSimplePointsMap.h>
 #include <mrpt/poses/CPose3DPDFGaussian.h>
@@ -31,16 +32,30 @@ LidarICP::LidarICP() = default;
 
 void LidarICP::initialize(const std::string& cfg_block)
 {
-    //
-    MRPT_TODO("Load params into params_");
+    MRPT_TRY_START
 
     // Default params:
-    params_.mrpt_icp.corresponding_points_decimation = 20;
-    params_.mrpt_icp.maxIterations                   = 50;
-    params_.mrpt_icp.skip_cov_calculation            = false;
-    params_.mrpt_icp.thresholdDist                   = 1.25;
-    params_.mrpt_icp.thresholdAng                    = mrpt::DEG2RAD(1.0);
-    params_.mrpt_icp.ALFA                            = 0.01;
+    params_.mrpt_icp.maxIterations        = 50;
+    params_.mrpt_icp.skip_cov_calculation = false;
+    params_.mrpt_icp.thresholdDist        = 1.25;
+    params_.mrpt_icp.thresholdAng         = mrpt::DEG2RAD(1.0);
+    params_.mrpt_icp.ALFA                 = 0.01;
+
+    // Load:
+    auto c   = YAML::Load(cfg_block);
+    auto cfg = c["params"];
+    MRPT_LOG_DEBUG_STREAM("Loading these params:\n" << cfg);
+
+    YAML_LOAD_REQ(params_, min_dist_xyz_between_keyframes, double);
+    YAML_LOAD_OPT(params_, min_time_between_scans, double);
+    YAML_LOAD_OPT(params_, min_icp_goodness, double);
+    YAML_LOAD_OPT(params_, decimate_to_point_count, unsigned int);
+
+    YAML_LOAD_OPT(params_, mrpt_icp.maxIterations, unsigned int);
+    YAML_LOAD_OPT(params_, mrpt_icp.thresholdDist, double);
+    YAML_LOAD_OPT_DEG(params_, mrpt_icp.thresholdAng, double);
+
+    MRPT_TRY_END
 }
 void LidarICP::spinOnce()
 {
@@ -70,6 +85,7 @@ void LidarICP::onNewObservation(CObservation::Ptr& o)
             5.0, "Dropping observation due to worker threads too busy.");
         return;
     }
+    profiler_.enter("delay_onNewObs_to_process");
 
     // Enqueue task:
     worker_pool_.enqueue(&LidarICP::doProcessNewObservation, this, o);
@@ -87,12 +103,13 @@ void LidarICP::doProcessNewObservation(CObservation::Ptr& o)
         ASSERT_(o);
 
         ProfilerEntry tleg(profiler_, "doProcessNewObservation");
+        profiler_.leave("delay_onNewObs_to_process");
 
         // Only process pointclouds that are sufficiently apart in time:
         const auto this_obs_tim = o->timestamp;
         if (state_.last_obs_tim != mrpt::Clock::time_point() &&
             mrpt::system::timeDifference(state_.last_obs_tim, this_obs_tim) <
-                params_.min_time_between_scans_)
+                params_.min_time_between_scans)
         {
             // Drop observation.
             return;
@@ -140,14 +157,26 @@ void LidarICP::doProcessNewObservation(CObservation::Ptr& o)
             state_.last_iter_twist.vz * dt);
         MRPT_TODO("do omega_xyz part!");
 
+        profiler_.enter("doProcessNewObservation.icp_latest");
+
         mrpt::slam::CICP::TReturnInfo ret_info;
+
         // Call ICP:
+        if (params_.decimate_to_point_count > 0)
+        {
+            unsigned decim = static_cast<unsigned>(
+                this_obs_points->size() / params_.decimate_to_point_count);
+            params_.mrpt_icp.corresponding_points_decimation = decim;
+        }
+
         state_.mrpt_icp.options = params_.mrpt_icp;
         auto rel_pose_pdf       = state_.mrpt_icp.Align3DPDF(
             last_points.get(), this_obs_points.get(), initial_guess,
             nullptr /*running_time*/, &ret_info);
 
         const mrpt::poses::CPose3D rel_pose = rel_pose_pdf->getMeanVal();
+
+        profiler_.leave("doProcessNewObservation.icp_latest");
 
         // Update velocity model:
         state_.last_iter_twist.vx = rel_pose.x() / dt;
@@ -161,6 +190,11 @@ void LidarICP::doProcessNewObservation(CObservation::Ptr& o)
             ret_info.nIterations);
 
         MRPT_LOG_DEBUG_STREAM("ICP rel_pose=" << rel_pose.asString());
+        MRPT_LOG_DEBUG_STREAM(
+            "Cur point count="
+            << this_obs_points->size()
+            << " last point count=" << last_points->size() << " decimation="
+            << params_.mrpt_icp.corresponding_points_decimation);
         MRPT_LOG_DEBUG_STREAM(
             "Est.twist=" << state_.last_iter_twist.asString());
         MRPT_LOG_DEBUG_STREAM(
