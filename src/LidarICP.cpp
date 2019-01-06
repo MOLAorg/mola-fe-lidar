@@ -230,13 +230,13 @@ void LidarICP::doProcessNewObservation(CObservation::Ptr& o)
             auto kf_out = kf_out_fut.get();
 
             ASSERT_(kf_out.success);
-            ASSERT_(kf_out.new_kf_id != mola::INVALID_ID);
+            ASSERT_(kf_out.new_kf_id && kf_out.new_kf_id != mola::INVALID_ID);
 
             // 2) New SE(3) constraint between consecutive Keyframes:
             MRPT_TODO("Continue here!");
 
             MRPT_LOG_INFO_STREAM(
-                "New KF: ID=" << kf_out.new_kf_id.value() << " rel_pose="
+                "New KF: ID=" << *kf_out.new_kf_id << " rel_pose="
                               << state_.accum_since_last_kf.asString());
 
             // Reset accumulators:
