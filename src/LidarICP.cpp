@@ -209,8 +209,7 @@ void LidarICP::doProcessNewObservation(CObservation::Ptr& o)
             "Since last KF: dist=%5.03f m", dist_eucl_since_last);
 
         if (icp_goodness > params_.min_icp_goodness &&
-            (state_.last_kf == mola::INVALID_ID ||
-             dist_eucl_since_last > params_.min_dist_xyz_between_keyframes))
+            dist_eucl_since_last > params_.min_dist_xyz_between_keyframes)
         {
             // Yes: create new KF
             // 1) New KeyFrame
@@ -224,7 +223,7 @@ void LidarICP::doProcessNewObservation(CObservation::Ptr& o)
             }
 
             std::future<BackEndBase::ProposeKF_Output> kf_out_fut;
-            kf_out_fut = slam_backend_->onProposeNewKeyFrame(kf);
+            kf_out_fut = slam_backend_->addKeyFrame(kf);
 
             // Wait until it's executed:
             auto kf_out = kf_out_fut.get();
@@ -233,8 +232,25 @@ void LidarICP::doProcessNewObservation(CObservation::Ptr& o)
             ASSERT_(kf_out.new_kf_id && kf_out.new_kf_id != mola::INVALID_ID);
 
             // 2) New SE(3) constraint between consecutive Keyframes:
-            MRPT_TODO("Continue here!");
+            if (state_.last_kf != mola::INVALID_ID)
+            {
+                std::future<BackEndBase::AddFactor_Output> factor_out_fut;
+                mola::FactorRelativePose3                  fPose3(
+                    state_.last_kf, kf_out.new_kf_id.value(),
+                    state_.accum_since_last_kf.asTPose());
 
+                mola::Factor f = std::move(fPose3);
+                factor_out_fut = slam_backend_->addFactor(f);
+
+                // Wait until it's executed:
+                auto factor_out = factor_out_fut.get();
+                ASSERT_(factor_out.success);
+                ASSERT_(
+                    factor_out.new_factor_id &&
+                    factor_out.new_factor_id != mola::INVALID_FID);
+            }
+
+            // Done.
             MRPT_LOG_INFO_STREAM(
                 "New KF: ID=" << *kf_out.new_kf_id << " rel_pose="
                               << state_.accum_since_last_kf.asString());
