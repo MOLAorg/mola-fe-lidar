@@ -331,17 +331,25 @@ void LidarICP::checkForNearbyKFs()
         std::advance(it, KF_distances.size() / 2);
         const auto kf_id = it->second;
 
+        bool edge_already_exists =
+            (std::abs(
+                 static_cast<int64_t>(kf_id) - static_cast<int64_t>(lpg.root)) <
+             2);
+
         MRPT_TODO("Double check an edge does not exist already!");
 
-        auto d                    = std::make_shared<DataForCheckEdges>();
-        d->to_id                  = kf_id;
-        d->from_id                = lpg.root;
-        d->to_pc                  = state_.local_pcs[d->to_id];
-        d->from_pc                = state_.local_pcs[d->from_id];
-        d->init_guess_to_wrt_from = lpg.nodes[kf_id].asTPose();
+        if (!edge_already_exists)
+        {
+            auto d                    = std::make_shared<DataForCheckEdges>();
+            d->to_id                  = kf_id;
+            d->from_id                = lpg.root;
+            d->to_pc                  = state_.local_pcs[d->to_id];
+            d->from_pc                = state_.local_pcs[d->from_id];
+            d->init_guess_to_wrt_from = lpg.nodes[kf_id].asTPose();
 
-        worker_pool_past_KFs_.enqueue(
-            &LidarICP::doCheckForNonAdjacentKFs, this, d);
+            worker_pool_past_KFs_.enqueue(
+                &LidarICP::doCheckForNonAdjacentKFs, this, d);
+        }
     }
 
     MRPT_END
@@ -353,11 +361,6 @@ void LidarICP::doCheckForNonAdjacentKFs(
     try
     {
         ProfilerEntry tleg(profiler_, "doCheckForNonAdjacentKFs");
-
-        MRPT_LOG_DEBUG_STREAM(
-            "Checking non-adjacent KFs: #"
-            << d->from_id << " ==> #" << d->to_id
-            << " init_guess: " << d->init_guess_to_wrt_from.asString());
 
         mrpt::poses::CPose3DPDFGaussian initial_guess;
         initial_guess.mean = mrpt::poses::CPose3D(d->init_guess_to_wrt_from);
@@ -380,13 +383,14 @@ void LidarICP::doCheckForNonAdjacentKFs(
         const double correction_percent =
             pos_correction / (initial_guess.mean.norm() + 0.01);
 
-        MRPT_LOG_DEBUG_FMT(
-            "[doCheckForNonAdjacentKFs] MRPT ICP: goodness=%.03f iters=%u",
-            ret_info.goodness, ret_info.nIterations);
-
         MRPT_LOG_DEBUG_STREAM(
-            "[doCheckForNonAdjacentKFs] ICP rel_pose="
-            << rel_pose.asString() << " init_guess was "
+            "[doCheckForNonAdjacentKFs] Checking KFs: #"
+            << d->from_id << " ==> #" << d->to_id
+            << " init_guess: " << d->init_guess_to_wrt_from.asString() << "\n"
+            << mrpt::format(
+                   "MRPT ICP: goodness=%.03f iters=%u\n", ret_info.goodness,
+                   ret_info.nIterations)
+            << "ICP rel_pose=" << rel_pose.asString() << " init_guess was "
             << initial_guess.mean.asString() << " (changes "
             << 100 * correction_percent << "%)");
 
