@@ -13,6 +13,7 @@
 
 #include <mola-kernel/FrontEndBase.h>
 #include <mola-kernel/WorkerThreadsPool.h>
+#include <mrpt/graphs/CNetworkOfPoses.h>
 #include <mrpt/maps/CPointsMap.h>
 #include <mrpt/slam/CICP.h>
 
@@ -54,6 +55,8 @@ class LidarICP : public FrontEndBase
          * number of points */
         unsigned int decimate_to_point_count{500};
 
+        unsigned int max_KFs_local_graph{8};
+
         mrpt::slam::CICP::TConfigParams mrpt_icp{};
     };
 
@@ -63,6 +66,10 @@ class LidarICP : public FrontEndBase
    private:
     /** The worker thread pool with 1 thread for processing incomming scans */
     mola::WorkerThreadsPool worker_pool_{1};
+
+    /** Worker thread to align a new KF against past KFs:*/
+    mola::WorkerThreadsPool worker_pool_past_KFs_{
+        2, mola::WorkerThreadsPool::POLICY_DROP_OLD};
 
     /** All variables that hold the algorithm state */
     struct MethodState
@@ -74,6 +81,11 @@ class LidarICP : public FrontEndBase
         mrpt::math::TTwist3D        last_iter_twist;
         id_t                        last_kf{mola::INVALID_ID};
         mrpt::poses::CPose3D        accum_since_last_kf{};
+
+        // An auxiliary (local) pose-graph to use Dijkstra and find guesses
+        // for ICP against nearby past KFs:
+        mrpt::graphs::CNetworkOfPoses3D local_pose_graph;
+        std::map<mrpt::graphs::TNodeID, mrpt::maps::CPointsMap::Ptr> local_pcs;
     };
 
     MethodState state_;
@@ -81,6 +93,22 @@ class LidarICP : public FrontEndBase
     /** Here happens the actual processing, invoked from the worker thread pool
      * for each incomming observation */
     void doProcessNewObservation(CObservation::Ptr& o);
+
+    struct DataForCheckEdges
+    {
+        id_t                        to_id{mola::INVALID_ID};
+        id_t                        from_id{mola::INVALID_ID};
+        mrpt::maps::CPointsMap::Ptr to_pc{}, from_pc{};
+        mrpt::math::TPose3D         init_guess_to_wrt_from;
+    };
+
+    void checkForNearbyKFs();
+
+    /** Invoked from doProcessNewObservation() whenever a new KF is created,
+     * to check for additional edges apart of the "odometry edge", to increase
+     * the quality of the estimation by increasing the pose-graph density.
+     */
+    void doCheckForNonAdjacentKFs(const std::shared_ptr<DataForCheckEdges>& d);
 };
 
 }  // namespace mola

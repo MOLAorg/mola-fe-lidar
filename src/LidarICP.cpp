@@ -168,9 +168,9 @@ void LidarICP::doProcessNewObservation(CObservation::Ptr& o)
                 this_obs_points->size() / params_.decimate_to_point_count);
             params_.mrpt_icp.corresponding_points_decimation = decim;
         }
-
         state_.mrpt_icp.options = params_.mrpt_icp;
-        auto rel_pose_pdf       = state_.mrpt_icp.Align3DPDF(
+
+        auto rel_pose_pdf = state_.mrpt_icp.Align3DPDF(
             last_points.get(), this_obs_points.get(), initial_guess,
             nullptr /*running_time*/, &ret_info);
 
@@ -208,6 +208,7 @@ void LidarICP::doProcessNewObservation(CObservation::Ptr& o)
         MRPT_LOG_DEBUG_FMT(
             "Since last KF: dist=%5.03f m", dist_eucl_since_last);
 
+        // Should we create a new KF?
         if (icp_goodness > params_.min_icp_goodness &&
             dist_eucl_since_last > params_.min_dist_xyz_between_keyframes)
         {
@@ -229,7 +230,12 @@ void LidarICP::doProcessNewObservation(CObservation::Ptr& o)
             auto kf_out = kf_out_fut.get();
 
             ASSERT_(kf_out.success);
-            ASSERT_(kf_out.new_kf_id && kf_out.new_kf_id != mola::INVALID_ID);
+            ASSERT_(
+                kf_out.new_kf_id &&
+                kf_out.new_kf_id.value() != mola::INVALID_ID);
+
+            // Add point cloud to local graph:
+            state_.local_pcs[kf_out.new_kf_id.value()] = this_obs_points;
 
             // 2) New SE(3) constraint between consecutive Keyframes:
             if (state_.last_kf != mola::INVALID_ID)
@@ -248,6 +254,11 @@ void LidarICP::doProcessNewObservation(CObservation::Ptr& o)
                 ASSERT_(
                     factor_out.new_factor_id &&
                     factor_out.new_factor_id != mola::INVALID_FID);
+
+                // Append to local graph as well::
+                state_.local_pose_graph.insertEdgeAtEnd(
+                    *kf_out.new_kf_id, state_.last_kf,
+                    state_.accum_since_last_kf);
             }
 
             // Done.
@@ -258,6 +269,147 @@ void LidarICP::doProcessNewObservation(CObservation::Ptr& o)
             // Reset accumulators:
             state_.accum_since_last_kf = mrpt::poses::CPose3D();
             state_.last_kf             = kf_out.new_kf_id.value();
+        }  // end done add a new KF
+
+        // Now, let's try to align this new KF against a few past KFs as well.
+        // we'll do it in separate threads, with priorities so the latest KFs
+        // are always attended first:
+        if (state_.local_pcs.size() > 1)
+        {
+            ProfilerEntry tle(
+                profiler_, "doProcessNewObservation.checkForNearbyKFs");
+
+            checkForNearbyKFs();
+        }
+    }
+    catch (const std::exception& e)
+    {
+        MRPT_LOG_ERROR_STREAM("Exception:\n" << mrpt::exception_to_str(e));
+    }
+}
+
+void LidarICP::checkForNearbyKFs()
+{
+    MRPT_START
+
+    // Run Dijkstra wrt to the last KF:
+    auto& lpg = state_.local_pose_graph;
+
+    lpg.root = state_.last_kf;
+    lpg.nodes.clear();
+    lpg.nodes[lpg.root] = mrpt::poses::CPose3D::Identity();
+    lpg.dijkstra_nodes_estimate();
+
+    // Remove too distant KFs: they belong to "loop closure", not to
+    // "lidar odometry"!
+    std::map<double, mrpt::graphs::TNodeID> KF_distances;
+    for (const auto& kfs : lpg.nodes)
+        KF_distances[kfs.second.norm()] = kfs.first;
+
+    std::map<mrpt::graphs::TNodeID, std::set<mrpt::graphs::TNodeID>> adj;
+    lpg.getAdjacencyMatrix(adj);
+
+    while (lpg.nodes.size() > params_.max_KFs_local_graph)
+    {
+        const auto id_to_remove = KF_distances.rbegin()->second;
+        KF_distances.erase(std::prev(KF_distances.end()));
+
+        lpg.nodes.erase(id_to_remove);
+        state_.local_pcs.erase(id_to_remove);
+        for (const auto other_id : adj[id_to_remove])
+        {
+            lpg.edges.erase(std::make_pair(id_to_remove, other_id));
+            lpg.edges.erase(std::make_pair(other_id, id_to_remove));
+        }
+    }
+
+    if (!KF_distances.empty())
+    {
+        // Pick the node at an intermediary distance and try to align
+        // against it:
+        auto it = KF_distances.begin();
+        std::advance(it, KF_distances.size() / 2);
+        const auto kf_id = it->second;
+
+        MRPT_TODO("Double check an edge does not exist already!");
+
+        auto d                    = std::make_shared<DataForCheckEdges>();
+        d->to_id                  = kf_id;
+        d->from_id                = lpg.root;
+        d->to_pc                  = state_.local_pcs[d->to_id];
+        d->from_pc                = state_.local_pcs[d->from_id];
+        d->init_guess_to_wrt_from = lpg.nodes[kf_id].asTPose();
+
+        worker_pool_past_KFs_.enqueue(
+            &LidarICP::doCheckForNonAdjacentKFs, this, d);
+    }
+
+    MRPT_END
+}
+
+void LidarICP::doCheckForNonAdjacentKFs(
+    const std::shared_ptr<DataForCheckEdges>& d)
+{
+    try
+    {
+        ProfilerEntry tleg(profiler_, "doCheckForNonAdjacentKFs");
+
+        MRPT_LOG_DEBUG_STREAM(
+            "Checking non-adjacent KFs: #"
+            << d->from_id << " ==> #" << d->to_id
+            << " init_guess: " << d->init_guess_to_wrt_from.asString());
+
+        mrpt::poses::CPose3DPDFGaussian initial_guess;
+        initial_guess.mean = mrpt::poses::CPose3D(d->init_guess_to_wrt_from);
+
+        // Call ICP:
+        // Use current values for: state_.mrpt_icp.options
+        mrpt::slam::CICP::TReturnInfo ret_info;
+        ASSERT_(d->from_pc);
+        ASSERT_(d->to_pc);
+
+        auto rel_pose_pdf = state_.mrpt_icp.Align3DPDF(
+            d->from_pc.get(), d->to_pc.get(), initial_guess,
+            nullptr /*running_time*/, &ret_info);
+
+        const mrpt::poses::CPose3D rel_pose     = rel_pose_pdf->getMeanVal();
+        const double               icp_goodness = ret_info.goodness;
+
+        // Accept the new edge?
+        const double pos_correction = (rel_pose - initial_guess.mean).norm();
+        const double correction_percent =
+            pos_correction / (initial_guess.mean.norm() + 0.01);
+
+        MRPT_LOG_DEBUG_FMT(
+            "[doCheckForNonAdjacentKFs] MRPT ICP: goodness=%.03f iters=%u",
+            ret_info.goodness, ret_info.nIterations);
+
+        MRPT_LOG_DEBUG_STREAM(
+            "[doCheckForNonAdjacentKFs] ICP rel_pose="
+            << rel_pose.asString() << " init_guess was "
+            << initial_guess.mean.asString() << " (changes "
+            << 100 * correction_percent << "%)");
+
+        if (icp_goodness > params_.min_icp_goodness &&
+            correction_percent < 0.20)
+        {
+            std::future<BackEndBase::AddFactor_Output> factor_out_fut;
+            mola::FactorRelativePose3                  fPose3(
+                d->from_id, d->to_id, rel_pose.asTPose());
+
+            mola::Factor f = std::move(fPose3);
+            factor_out_fut = slam_backend_->addFactor(f);
+
+            // Wait until it's executed:
+            auto factor_out = factor_out_fut.get();
+            ASSERT_(factor_out.success);
+            ASSERT_(
+                factor_out.new_factor_id &&
+                factor_out.new_factor_id != mola::INVALID_FID);
+
+            // Append to local graph as well::
+            state_.local_pose_graph.insertEdgeAtEnd(
+                d->from_id, d->to_id, rel_pose);
         }
     }
     catch (const std::exception& e)

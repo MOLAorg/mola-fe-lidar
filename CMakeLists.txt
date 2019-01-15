@@ -26,6 +26,7 @@ mola_configure_library(${PROJECT_NAME})
 
 # find dependencies:
 find_package(mrpt-slam)
+find_package(mrpt-graphs)
 
 # Public lib Dependencies:
 target_link_libraries(${PROJECT_NAME}
@@ -37,4 +38,5 @@ target_link_libraries(${PROJECT_NAME}
 target_link_libraries(${PROJECT_NAME}
   PRIVATE
     mrpt-slam
+    mrpt-graphs
 )
