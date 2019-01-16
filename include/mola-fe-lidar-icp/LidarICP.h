@@ -86,9 +86,13 @@ class LidarICP : public FrontEndBase
         // for ICP against nearby past KFs:
         mrpt::graphs::CNetworkOfPoses3D local_pose_graph;
         std::map<mrpt::graphs::TNodeID, mrpt::maps::CPointsMap::Ptr> local_pcs;
+        /** Pairs of KFs that have been already checked for loop closure */
+        std::set<std::pair<id_t, id_t>> checked_KF_pairs;
     };
 
     MethodState state_;
+
+    WorldModel::Ptr worldmodel_;
 
     /** Here happens the actual processing, invoked from the worker thread pool
      * for each incomming observation */

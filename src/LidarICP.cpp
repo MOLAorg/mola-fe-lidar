@@ -55,6 +55,11 @@ void LidarICP::initialize(const std::string& cfg_block)
     YAML_LOAD_OPT(params_, mrpt_icp.thresholdDist, double);
     YAML_LOAD_OPT_DEG(params_, mrpt_icp.thresholdAng, double);
 
+    // attach to world model, if present:
+    auto wms = findService<WorldModel>();
+    if (wms.size() == 1)
+        worldmodel_ = std::dynamic_pointer_cast<WorldModel>(wms[0]);
+
     MRPT_TRY_END
 }
 void LidarICP::spinOnce()
@@ -336,7 +341,34 @@ void LidarICP::checkForNearbyKFs()
                  static_cast<int64_t>(kf_id) - static_cast<int64_t>(lpg.root)) <
              2);
 
-        MRPT_TODO("Double check an edge does not exist already!");
+        // Already sent out for checking?
+        const auto pair_ids = std::make_pair(
+            std::min(kf_id, lpg.root), std::max(kf_id, lpg.root));
+
+        if (state_.checked_KF_pairs.count(pair_ids) != 0)
+        {
+            // Yes:
+            edge_already_exists = true;
+        }
+
+        MRPT_TODO("Factors should have an annotation to know who created them");
+        // Also check in the WorldModel if *we* created an edge already between
+        // those two KFs:
+        if (!edge_already_exists && worldmodel_)
+        {
+            worldmodel_->entities_lock();
+            const auto connected = worldmodel_->entity_neighbors(kf_id);
+            if (connected.count(lpg.root) != 0)
+            {
+                MRPT_LOG_DEBUG_STREAM(
+                    "[checkForNearbyKFs] Discarding pair check since a factor "
+                    "already exists between #"
+                    << kf_id << " <==> #" << lpg.root);
+                edge_already_exists = false;
+            }
+
+            worldmodel_->entities_unlock();
+        }
 
         if (!edge_already_exists)
         {
@@ -349,6 +381,9 @@ void LidarICP::checkForNearbyKFs()
 
             worker_pool_past_KFs_.enqueue(
                 &LidarICP::doCheckForNonAdjacentKFs, this, d);
+
+            // Mark as sent for check:
+            state_.checked_KF_pairs.insert(pair_ids);
         }
     }
 
