@@ -16,6 +16,7 @@
 #include <mrpt/graphs/CNetworkOfPoses.h>
 #include <mrpt/maps/CPointsMap.h>
 #include <mrpt/slam/CICP.h>
+#include <mutex>
 
 namespace mola
 {
@@ -124,6 +125,8 @@ class LidarICP : public FrontEndBase
      * the quality of the estimation by increasing the pose-graph density.
      */
     void doCheckForNonAdjacentKFs(const std::shared_ptr<ICP_Input>& d);
+
+    std::mutex kdtree_build_mtx_;
 };
 
 }  // namespace mola

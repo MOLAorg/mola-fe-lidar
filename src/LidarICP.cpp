@@ -157,26 +157,13 @@ void LidarICP::doProcessNewObservation(CObservation::Ptr& o)
             return;
         }
 
+        if (0)
         {
             ProfilerEntry tle(
                 profiler_, "doProcessNewObservation.filter_pointclouds");
 
             this_obs_points->clipOutOfRangeInZ(-1.2f, 5.0f);
             last_points->clipOutOfRangeInZ(-1.2f, 5.0f);
-        }
-
-        {
-            ProfilerEntry tle(
-                profiler_, "doProcessNewObservation.build_kd_tree");
-
-            // Ensure the kd-tree is built.
-            // It's important to enfore it to be build now in a single thread,
-            // before the pointclouds go to different threads, which may cause
-            // mem corruption:
-            this_obs_points->mark_as_modified();
-            last_points->mark_as_modified();
-            this_obs_points->kdTreeEnsureIndexBuilt3D();
-            last_points->kdTreeEnsureIndexBuilt3D();
         }
 
         // Register point clouds using any of the available ICP algorithms:
@@ -491,6 +478,19 @@ void LidarICP::run_one_icp(const ICP_Input& in, ICP_Output& out)
         unsigned decim = static_cast<unsigned>(
             in.to_pc->size() / params_.decimate_to_point_count);
         mrpt_icp.options.corresponding_points_decimation = decim;
+    }
+
+    {
+        ProfilerEntry tle(profiler_, "run_one_icp.build_kd_tree");
+
+        std::lock_guard<std::mutex> lck(kdtree_build_mtx_);
+
+        // Ensure the kd-tree is built.
+        // It's important to enfore it to be build now in a single thread,
+        // before the pointclouds go to different threads, which may cause
+        // mem corruption:
+        in.from_pc->kdTreeEnsureIndexBuilt3D();
+        in.to_pc->kdTreeEnsureIndexBuilt3D();
     }
 
     mrpt::poses::CPose3DPDFGaussian initial_guess;
