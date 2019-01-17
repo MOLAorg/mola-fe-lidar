@@ -89,6 +89,9 @@ class LidarICP : public FrontEndBase
         std::map<mrpt::graphs::TNodeID, mrpt::maps::CPointsMap::Ptr> local_pcs;
         /** Pairs of KFs that have been already checked for loop closure */
         std::set<std::pair<id_t, id_t>> checked_KF_pairs;
+
+        // Debug aux variables:
+        unsigned int debug_dump_icp_file_counter{0};
     };
 
     MethodState state_;
@@ -98,34 +101,29 @@ class LidarICP : public FrontEndBase
     /** Here happens the actual processing, invoked from the worker thread pool
      * for each incomming observation */
     void doProcessNewObservation(CObservation::Ptr& o);
+    void checkForNearbyKFs();
 
-    struct DataForCheckEdges
+    struct ICP_Input
     {
         id_t                        to_id{mola::INVALID_ID};
         id_t                        from_id{mola::INVALID_ID};
         mrpt::maps::CPointsMap::Ptr to_pc{}, from_pc{};
         mrpt::math::TPose3D         init_guess_to_wrt_from;
-    };
-
-    void checkForNearbyKFs();
-
-    /** Invoked from doProcessNewObservation() whenever a new KF is created,
-     * to check for additional edges apart of the "odometry edge", to increase
-     * the quality of the estimation by increasing the pose-graph density.
-     */
-    void doCheckForNonAdjacentKFs(const std::shared_ptr<DataForCheckEdges>& d);
-
-    struct ICP_Input
-    {
-        mrpt::maps::CPointsMap::Ptr to_pc{}, from_pc{};
-        mrpt::math::TPose3D         init_guess_to_wrt_from;
+        /** used to identity where does this request come from */
+        std::string debug_str;
     };
     struct ICP_Output
     {
         double                       goodness{.0};
         mrpt::poses::CPose3DPDF::Ptr found_pose_to_wrt_from;
     };
-    void run_one_icp(const ICP_Input& in, ICP_Output& out) const;
+    void run_one_icp(const ICP_Input& in, ICP_Output& out);
+
+    /** Invoked from doProcessNewObservation() whenever a new KF is created,
+     * to check for additional edges apart of the "odometry edge", to increase
+     * the quality of the estimation by increasing the pose-graph density.
+     */
+    void doCheckForNonAdjacentKFs(const std::shared_ptr<ICP_Input>& d);
 };
 
 }  // namespace mola

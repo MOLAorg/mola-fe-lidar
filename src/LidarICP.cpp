@@ -20,8 +20,12 @@
 #include <mola-kernel/yaml_helpers.h>
 #include <mrpt/core/initializer.h>
 #include <mrpt/maps/CSimplePointsMap.h>
+#include <mrpt/opengl/COpenGLScene.h>
+#include <mrpt/opengl/CText.h>
+#include <mrpt/opengl/stock_objects.h>
 #include <mrpt/poses/CPose3DPDFGaussian.h>
 #include <mrpt/system/datetime.h>
+#include <mrpt/system/filesystem.h>
 #include <yaml-cpp/yaml.h>
 
 using namespace mola;
@@ -54,6 +58,8 @@ void LidarICP::initialize(const std::string& cfg_block)
     YAML_LOAD_OPT(params_, mrpt_icp.maxIterations, unsigned int);
     YAML_LOAD_OPT(params_, mrpt_icp.thresholdDist, double);
     YAML_LOAD_OPT_DEG(params_, mrpt_icp.thresholdAng, double);
+
+    YAML_LOAD_OPT(params_, debug_save_all_icp_results, bool);
 
     // attach to world model, if present:
     auto wms = findService<WorldModel>();
@@ -151,6 +157,18 @@ void LidarICP::doProcessNewObservation(CObservation::Ptr& o)
             return;
         }
 
+        {
+            ProfilerEntry tle(
+                profiler_, "doProcessNewObservation.build_kd_tree");
+
+            // Ensure the kd-tree is built.
+            // It's important to enfore it to be build now in a single thread,
+            // before the pointclouds go to different threads, which may cause
+            // mem corruption:
+            this_obs_points->kdTreeEnsureIndexBuilt3D();
+            last_points->kdTreeEnsureIndexBuilt3D();
+        }
+
         // Register point clouds using any of the available ICP algorithms:
         mrpt::poses::CPose3DPDFGaussian initial_guess;
         // Use velocity model for the initial guess:
@@ -167,6 +185,9 @@ void LidarICP::doProcessNewObservation(CObservation::Ptr& o)
 
         icp_in.to_pc   = this_obs_points;
         icp_in.from_pc = last_points;
+        icp_in.from_id = state_.last_kf;
+        icp_in.to_id   = mola::INVALID_ID;  // current data, not a new KF (yet)
+        icp_in.debug_str = "lidar_odometry";
 
         {
             ProfilerEntry tle(profiler_, "doProcessNewObservation.icp_latest");
@@ -359,12 +380,12 @@ void LidarICP::checkForNearbyKFs()
 
         if (!edge_already_exists)
         {
-            auto d                    = std::make_shared<DataForCheckEdges>();
+            auto d                    = std::make_shared<ICP_Input>();
             d->to_id                  = kf_id;
             d->from_id                = lpg.root;
             d->to_pc                  = state_.local_pcs[d->to_id];
             d->from_pc                = state_.local_pcs[d->from_id];
-            d->init_guess_to_wrt_from = lpg.nodes[kf_id].asTPose();
+            d->init_guess_to_wrt_from = (-lpg.nodes[kf_id]).asTPose();
 
             worker_pool_past_KFs_.enqueue(
                 &LidarICP::doCheckForNonAdjacentKFs, this, d);
@@ -377,8 +398,7 @@ void LidarICP::checkForNearbyKFs()
     MRPT_END
 }
 
-void LidarICP::doCheckForNonAdjacentKFs(
-    const std::shared_ptr<DataForCheckEdges>& d)
+void LidarICP::doCheckForNonAdjacentKFs(const std::shared_ptr<ICP_Input>& d)
 {
     try
     {
@@ -391,15 +411,11 @@ void LidarICP::doCheckForNonAdjacentKFs(
         ASSERT_(d->to_pc);
 
         ICP_Output icp_out;
-        ICP_Input  icp_in;
-        icp_in.from_pc                = d->from_pc;
-        icp_in.to_pc                  = d->to_pc;
-        icp_in.init_guess_to_wrt_from = d->init_guess_to_wrt_from;
-
+        d->debug_str = "doCheckForNonAdjacentKFs";
         {
             ProfilerEntry tle(profiler_, "doCheckForNonAdjacentKFs.icp");
 
-            run_one_icp(icp_in, icp_out);
+            run_one_icp(*d, icp_out);
         }
         const mrpt::poses::CPose3D rel_pose =
             icp_out.found_pose_to_wrt_from->getMeanVal();
@@ -450,8 +466,10 @@ void LidarICP::doCheckForNonAdjacentKFs(
     }
 }
 
-void LidarICP::run_one_icp(const ICP_Input& in, ICP_Output& out) const
+void LidarICP::run_one_icp(const ICP_Input& in, ICP_Output& out)
 {
+    using namespace std::string_literals;
+
     MRPT_START
     ProfilerEntry tleg(profiler_, "run_one_icp");
 
@@ -479,10 +497,87 @@ void LidarICP::run_one_icp(const ICP_Input& in, ICP_Output& out) const
         ret_info.nIterations,
         out.found_pose_to_wrt_from->getMeanVal().asString().c_str());
 
+    // -------------------------------------------------
+    // Save debug files for debugging ICP quality
     if (params_.debug_save_all_icp_results)
     {
-        MRPT_TODO("impl me!");
-        //
+        auto fil_name_prefix = mrpt::system::fileNameStripInvalidChars(
+            getModuleInstanceName() +
+            mrpt::format(
+                "_debug_ICP_%s_%05u", in.debug_str.c_str(),
+                state_.debug_dump_icp_file_counter++));
+
+        // Init:
+        mrpt::opengl::COpenGLScene scene;
+
+        scene.insert(mrpt::opengl::stock_objects::CornerXYZSimple(2.0f, 4.0f));
+        auto gl_from                    = mrpt::opengl::CSetOfObjects::Create();
+        in.from_pc->renderOptions.color = mrpt::img::TColorf(.0f, .0f, 1.0f);
+        in.from_pc->getAs3DObject(gl_from);
+        gl_from->setName("KF_from"s);
+        gl_from->enableShowName();
+        scene.insert(gl_from);
+
+        auto gl_to = mrpt::opengl::CSetOfObjects::Create();
+        gl_to->insert(mrpt::opengl::stock_objects::CornerXYZSimple(1.0f, 2.0f));
+        in.to_pc->renderOptions.color = mrpt::img::TColorf(1.0f, .0f, .0f);
+        in.to_pc->getAs3DObject(gl_to);
+        gl_to->setName("KF_to"s);
+        gl_to->enableShowName();
+        gl_to->setPose(initial_guess.mean);
+        scene.insert(gl_to);
+
+        auto gl_info  = mrpt::opengl::CText::Create(),
+             gl_info2 = mrpt::opengl::CText::Create();
+        gl_info->setLocation(0., 0., 5.);
+        gl_info2->setLocation(0., 0., 4.8);
+        scene.insert(gl_info);
+        scene.insert(gl_info2);
+
+        {
+            std::ostringstream ss;
+            ss << "to_ID     = " << in.to_id << " from_ID   = " << in.from_id
+               << " | " << in.debug_str;
+            gl_info->setString(ss.str());
+        }
+        {
+            std::ostringstream ss;
+            ss << "init_pose = " << initial_guess.mean.asString();
+            gl_info2->setString(ss.str());
+        }
+
+        const auto fil_name_init = fil_name_prefix + "_0init.3Dscene"s;
+        if (scene.saveToFile(fil_name_init))
+            MRPT_LOG_DEBUG_STREAM(
+                "Wrote debug init ICP scene to: " << fil_name_init);
+        else
+            MRPT_LOG_ERROR_STREAM(
+                "Error saving init ICP scene to :" << fil_name_init);
+
+        // Final:
+        const auto final_pose = out.found_pose_to_wrt_from->getMeanVal();
+        gl_to->setPose(final_pose);
+
+        {
+            std::ostringstream ss;
+            ss << "to_ID     = " << in.to_id << " from_ID   = " << in.from_id;
+            gl_info->setString(ss.str());
+        }
+        {
+            std::ostringstream ss;
+            ss << " final_pose = " << final_pose.asString()
+               << " goodness: " << out.goodness * 100.0;
+
+            gl_info2->setString(ss.str());
+        }
+
+        const auto fil_name_final = fil_name_prefix + "_1final.3Dscene"s;
+        if (scene.saveToFile(fil_name_final))
+            MRPT_LOG_DEBUG_STREAM(
+                "Wrote debug final ICP scene to: " << fil_name_final);
+        else
+            MRPT_LOG_ERROR_STREAM(
+                "Error saving final ICP scene to :" << fil_name_final);
     }
 
     MRPT_END
