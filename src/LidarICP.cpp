@@ -159,12 +159,22 @@ void LidarICP::doProcessNewObservation(CObservation::Ptr& o)
 
         {
             ProfilerEntry tle(
+                profiler_, "doProcessNewObservation.filter_pointclouds");
+
+            this_obs_points->clipOutOfRangeInZ(-1.2f, 5.0f);
+            last_points->clipOutOfRangeInZ(-1.2f, 5.0f);
+        }
+
+        {
+            ProfilerEntry tle(
                 profiler_, "doProcessNewObservation.build_kd_tree");
 
             // Ensure the kd-tree is built.
             // It's important to enfore it to be build now in a single thread,
             // before the pointclouds go to different threads, which may cause
             // mem corruption:
+            this_obs_points->mark_as_modified();
+            last_points->mark_as_modified();
             this_obs_points->kdTreeEnsureIndexBuilt3D();
             last_points->kdTreeEnsureIndexBuilt3D();
         }
@@ -270,7 +280,7 @@ void LidarICP::doProcessNewObservation(CObservation::Ptr& o)
 
                 // Append to local graph as well::
                 state_.local_pose_graph.insertEdgeAtEnd(
-                    *kf_out.new_kf_id, state_.last_kf,
+                    state_.last_kf, *kf_out.new_kf_id,
                     state_.accum_since_last_kf);
             }
 
@@ -341,7 +351,7 @@ void LidarICP::checkForNearbyKFs()
         // Pick the node at an intermediary distance and try to align
         // against it:
         auto it = KF_distances.begin();
-        std::advance(it, KF_distances.size() / 2);
+        std::advance(it, KF_distances.size() * 0.75);
         const auto kf_id = it->second;
 
         bool edge_already_exists =
@@ -385,7 +395,7 @@ void LidarICP::checkForNearbyKFs()
             d->from_id                = lpg.root;
             d->to_pc                  = state_.local_pcs[d->to_id];
             d->from_pc                = state_.local_pcs[d->from_id];
-            d->init_guess_to_wrt_from = (-lpg.nodes[kf_id]).asTPose();
+            d->init_guess_to_wrt_from = lpg.nodes[kf_id].asTPose();
 
             worker_pool_past_KFs_.enqueue(
                 &LidarICP::doCheckForNonAdjacentKFs, this, d);
