@@ -58,6 +58,8 @@ class LidarICP : public FrontEndBase
         unsigned int max_KFs_local_graph{8};
 
         mrpt::slam::CICP::TConfigParams mrpt_icp{};
+
+        bool debug_save_all_icp_results{false};
     };
 
     /** Algorithm parameters */
@@ -77,7 +79,6 @@ class LidarICP : public FrontEndBase
         mrpt::Clock::time_point     last_obs_tim{};
         mrpt::maps::CPointsMap::Ptr last_points{};
         CObservation::Ptr           last_obs{};
-        mrpt::slam::CICP            mrpt_icp;
         mrpt::math::TTwist3D        last_iter_twist;
         id_t                        last_kf{mola::INVALID_ID};
         mrpt::poses::CPose3D        accum_since_last_kf{};
@@ -113,6 +114,18 @@ class LidarICP : public FrontEndBase
      * the quality of the estimation by increasing the pose-graph density.
      */
     void doCheckForNonAdjacentKFs(const std::shared_ptr<DataForCheckEdges>& d);
+
+    struct ICP_Input
+    {
+        mrpt::maps::CPointsMap::Ptr to_pc{}, from_pc{};
+        mrpt::math::TPose3D         init_guess_to_wrt_from;
+    };
+    struct ICP_Output
+    {
+        double                       goodness{.0};
+        mrpt::poses::CPose3DPDF::Ptr found_pose_to_wrt_from;
+    };
+    void run_one_icp(const ICP_Input& in, ICP_Output& out) const;
 };
 
 }  // namespace mola

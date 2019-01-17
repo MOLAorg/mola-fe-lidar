@@ -157,31 +157,24 @@ void LidarICP::doProcessNewObservation(CObservation::Ptr& o)
         double dt = .0;
         if (last_obs_tim != mrpt::Clock::time_point())
             dt = mrpt::system::timeDifference(last_obs_tim, this_obs_tim);
-        initial_guess.mean.setFromValues(
+
+        ICP_Output icp_out;
+        ICP_Input  icp_in;
+        icp_in.init_guess_to_wrt_from = mrpt::math::TPose3D(
             state_.last_iter_twist.vx * dt, state_.last_iter_twist.vy * dt,
-            state_.last_iter_twist.vz * dt);
+            state_.last_iter_twist.vz * dt, 0, 0, 0);
         MRPT_TODO("do omega_xyz part!");
 
-        profiler_.enter("doProcessNewObservation.icp_latest");
+        icp_in.to_pc   = this_obs_points;
+        icp_in.from_pc = last_points;
 
-        mrpt::slam::CICP::TReturnInfo ret_info;
-
-        // Call ICP:
-        if (params_.decimate_to_point_count > 0)
         {
-            unsigned decim = static_cast<unsigned>(
-                this_obs_points->size() / params_.decimate_to_point_count);
-            params_.mrpt_icp.corresponding_points_decimation = decim;
+            ProfilerEntry tle(profiler_, "doProcessNewObservation.icp_latest");
+
+            run_one_icp(icp_in, icp_out);
         }
-        state_.mrpt_icp.options = params_.mrpt_icp;
-
-        auto rel_pose_pdf = state_.mrpt_icp.Align3DPDF(
-            last_points.get(), this_obs_points.get(), initial_guess,
-            nullptr /*running_time*/, &ret_info);
-
-        const mrpt::poses::CPose3D rel_pose = rel_pose_pdf->getMeanVal();
-
-        profiler_.leave("doProcessNewObservation.icp_latest");
+        const mrpt::poses::CPose3D rel_pose =
+            icp_out.found_pose_to_wrt_from->getMeanVal();
 
         // Update velocity model:
         state_.last_iter_twist.vx = rel_pose.x() / dt;
@@ -189,12 +182,6 @@ void LidarICP::doProcessNewObservation(CObservation::Ptr& o)
         state_.last_iter_twist.vz = rel_pose.z() / dt;
         MRPT_TODO("do omega_xyz part!");
 
-        const double icp_goodness = ret_info.goodness;
-        MRPT_LOG_DEBUG_FMT(
-            "MRPT ICP: goodness=%.03f iters=%u", ret_info.goodness,
-            ret_info.nIterations);
-
-        MRPT_LOG_DEBUG_STREAM("ICP rel_pose=" << rel_pose.asString());
         MRPT_LOG_DEBUG_STREAM(
             "Cur point count="
             << this_obs_points->size()
@@ -214,7 +201,7 @@ void LidarICP::doProcessNewObservation(CObservation::Ptr& o)
             "Since last KF: dist=%5.03f m", dist_eucl_since_last);
 
         // Should we create a new KF?
-        if (icp_goodness > params_.min_icp_goodness &&
+        if (icp_out.goodness > params_.min_icp_goodness &&
             dist_eucl_since_last > params_.min_dist_xyz_between_keyframes)
         {
             // Yes: create new KF
@@ -397,26 +384,32 @@ void LidarICP::doCheckForNonAdjacentKFs(
     {
         ProfilerEntry tleg(profiler_, "doCheckForNonAdjacentKFs");
 
-        mrpt::poses::CPose3DPDFGaussian initial_guess;
-        initial_guess.mean = mrpt::poses::CPose3D(d->init_guess_to_wrt_from);
-
         // Call ICP:
         // Use current values for: state_.mrpt_icp.options
         mrpt::slam::CICP::TReturnInfo ret_info;
         ASSERT_(d->from_pc);
         ASSERT_(d->to_pc);
 
-        auto rel_pose_pdf = state_.mrpt_icp.Align3DPDF(
-            d->from_pc.get(), d->to_pc.get(), initial_guess,
-            nullptr /*running_time*/, &ret_info);
+        ICP_Output icp_out;
+        ICP_Input  icp_in;
+        icp_in.from_pc                = d->from_pc;
+        icp_in.to_pc                  = d->to_pc;
+        icp_in.init_guess_to_wrt_from = d->init_guess_to_wrt_from;
 
-        const mrpt::poses::CPose3D rel_pose     = rel_pose_pdf->getMeanVal();
-        const double               icp_goodness = ret_info.goodness;
+        {
+            ProfilerEntry tle(profiler_, "doCheckForNonAdjacentKFs.icp");
+
+            run_one_icp(icp_in, icp_out);
+        }
+        const mrpt::poses::CPose3D rel_pose =
+            icp_out.found_pose_to_wrt_from->getMeanVal();
+        const double icp_goodness = icp_out.goodness;
 
         // Accept the new edge?
-        const double pos_correction = (rel_pose - initial_guess.mean).norm();
+        const mrpt::poses::CPose3D init_guess(d->init_guess_to_wrt_from);
+        const double pos_correction = (rel_pose - init_guess).norm();
         const double correction_percent =
-            pos_correction / (initial_guess.mean.norm() + 0.01);
+            pos_correction / (init_guess.norm() + 0.01);
 
         MRPT_LOG_DEBUG_STREAM(
             "[doCheckForNonAdjacentKFs] Checking KFs: #"
@@ -426,8 +419,8 @@ void LidarICP::doCheckForNonAdjacentKFs(
                    "MRPT ICP: goodness=%.03f iters=%u\n", ret_info.goodness,
                    ret_info.nIterations)
             << "ICP rel_pose=" << rel_pose.asString() << " init_guess was "
-            << initial_guess.mean.asString() << " (changes "
-            << 100 * correction_percent << "%)");
+            << init_guess.asString() << " (changes " << 100 * correction_percent
+            << "%)");
 
         if (icp_goodness > params_.min_icp_goodness &&
             correction_percent < 0.20)
@@ -455,4 +448,42 @@ void LidarICP::doCheckForNonAdjacentKFs(
     {
         MRPT_LOG_ERROR_STREAM("Exception:\n" << mrpt::exception_to_str(e));
     }
+}
+
+void LidarICP::run_one_icp(const ICP_Input& in, ICP_Output& out) const
+{
+    MRPT_START
+    ProfilerEntry tleg(profiler_, "run_one_icp");
+
+    // Call ICP:
+    mrpt::slam::CICP mrpt_icp;
+    mrpt_icp.options = params_.mrpt_icp;
+    if (params_.decimate_to_point_count > 0)
+    {
+        unsigned decim = static_cast<unsigned>(
+            in.to_pc->size() / params_.decimate_to_point_count);
+        mrpt_icp.options.corresponding_points_decimation = decim;
+    }
+
+    mrpt::poses::CPose3DPDFGaussian initial_guess;
+    initial_guess.mean = mrpt::poses::CPose3D(in.init_guess_to_wrt_from);
+    mrpt::slam::CICP::TReturnInfo ret_info;
+
+    out.found_pose_to_wrt_from = mrpt_icp.Align3DPDF(
+        in.from_pc.get(), in.to_pc.get(), initial_guess,
+        nullptr /*running_time*/, &ret_info);
+
+    out.goodness = static_cast<double>(ret_info.goodness);
+    MRPT_LOG_DEBUG_FMT(
+        "MRPT ICP: goodness=%.03f iters=%u rel_pose=%s", out.goodness,
+        ret_info.nIterations,
+        out.found_pose_to_wrt_from->getMeanVal().asString().c_str());
+
+    if (params_.debug_save_all_icp_results)
+    {
+        MRPT_TODO("impl me!");
+        //
+    }
+
+    MRPT_END
 }
