@@ -163,6 +163,16 @@ void LidarICP::doProcessNewObservation(CObservation::Ptr& o)
                 *this_obs_points.original, *this_obs_points.sampled);
         }
 
+        // Ensure kd-trees are built.
+        // kd-trees have each own mutexes to ensure well-defined behavior:
+        {
+            ProfilerEntry tle(
+                profiler_, "doProcessNewObservation.3.build_kdtrees");
+
+            this_obs_points.original->kdTreeEnsureIndexBuilt3D();
+            this_obs_points.sampled->kdTreeEnsureIndexBuilt3D();
+        }
+
         // Store for next step:
         auto last_obs_tim   = state_.last_obs_tim;
         auto last_points    = state_.last_points;
@@ -525,32 +535,46 @@ void LidarICP::run_one_icp(const ICP_Input& in, ICP_Output& out)
     ASSERT_(in.from_pc.original && in.from_pc.sampled);
     ASSERT_(in.to_pc.original && in.to_pc.sampled);
 
-    // Call ICP:
-    mrpt::slam::CICP mrpt_icp;
-    mrpt_icp.options = in.mrpt_icp_params;
-    if (params_.decimate_to_point_count > 0)
-    {
-        unsigned decim = static_cast<unsigned>(
-            in.to_pc.sampled->size() / params_.decimate_to_point_count);
-        mrpt_icp.options.corresponding_points_decimation = decim;
-    }
-    else
-    {
-        mrpt_icp.options.corresponding_points_decimation = 1;
-    }
-
-    // Ensure kd-trees are built.
-    // kd-trees have each own mutexes to ensure well-defined behavior:
-    in.from_pc.sampled->kdTreeEnsureIndexBuilt3D();
-    in.to_pc.sampled->kdTreeEnsureIndexBuilt3D();
-
-    mrpt::poses::CPose3DPDFGaussian initial_guess;
-    initial_guess.mean = mrpt::poses::CPose3D(in.init_guess_to_wrt_from);
+    // Run two passes: one coarse with the sampled pointcloud, then
+    // another one with the full-resolution cloud:
+    auto current_init_guess = mrpt::poses::CPose3D(in.init_guess_to_wrt_from);
     mrpt::slam::CICP::TReturnInfo ret_info;
+    mrpt::slam::CICP              mrpt_icp;
 
-    out.found_pose_to_wrt_from = mrpt_icp.Align3DPDF(
-        in.from_pc.sampled.get(), in.to_pc.sampled.get(), initial_guess,
-        nullptr /*running_time*/, &ret_info);
+    for (int pass = 0; pass <= 1; pass++)
+    {
+        //
+        // Call ICP:
+        mrpt_icp.options = in.mrpt_icp_params;
+        auto& from_pc    = pass == 0 ? in.from_pc.sampled : in.from_pc.original;
+        auto& to_pc      = pass == 0 ? in.to_pc.sampled : in.to_pc.original;
+
+        if (params_.decimate_to_point_count > 0)
+        {
+            unsigned decim = static_cast<unsigned>(
+                to_pc->size() / params_.decimate_to_point_count);
+            mrpt_icp.options.corresponding_points_decimation = decim;
+        }
+        else
+        {
+            mrpt_icp.options.corresponding_points_decimation = 1;
+        }
+
+        mrpt::poses::CPose3DPDFGaussian initial_guess;
+        initial_guess.mean = current_init_guess;
+
+        out.found_pose_to_wrt_from = mrpt_icp.Align3DPDF(
+            from_pc.get(), to_pc.get(), initial_guess, nullptr /*running_time*/,
+            &ret_info);
+
+        current_init_guess = out.found_pose_to_wrt_from->getMeanVal();
+
+        MRPT_LOG_DEBUG_FMT(
+            "MRPT ICP pass #%i: goodness=%.03f iters=%u rel_pose=%s", pass,
+            out.goodness, ret_info.nIterations,
+            out.found_pose_to_wrt_from->getMeanVal().asString().c_str());
+
+    }  // end for each pass
 
     // Check quality of match:
     MRPT_TODO("Impl. finite differences based Hessian check");
@@ -558,10 +582,6 @@ void LidarICP::run_one_icp(const ICP_Input& in, ICP_Output& out)
     // matchExtraResults);
 
     out.goodness = static_cast<double>(ret_info.goodness);
-    MRPT_LOG_DEBUG_FMT(
-        "MRPT ICP: goodness=%.03f iters=%u rel_pose=%s", out.goodness,
-        ret_info.nIterations,
-        out.found_pose_to_wrt_from->getMeanVal().asString().c_str());
     MRPT_LOG_DEBUG_STREAM(
         "MRPT ICP: `to` point count="
         << in.to_pc.sampled->size()
@@ -597,7 +617,7 @@ void LidarICP::run_one_icp(const ICP_Input& in, ICP_Output& out)
         in.to_pc.sampled->getAs3DObject(gl_to);
         gl_to->setName("KF_to"s);
         gl_to->enableShowName();
-        gl_to->setPose(initial_guess.mean);
+        gl_to->setPose(in.init_guess_to_wrt_from);
         scene.insert(gl_to);
 
         auto gl_info  = mrpt::opengl::CText::Create(),
@@ -615,7 +635,7 @@ void LidarICP::run_one_icp(const ICP_Input& in, ICP_Output& out)
         }
         {
             std::ostringstream ss;
-            ss << "init_pose = " << initial_guess.mean.asString();
+            ss << "init_pose = " << in.init_guess_to_wrt_from.asString();
             gl_info2->setString(ss.str());
         }
 
