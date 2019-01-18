@@ -28,6 +28,57 @@
 #include <mrpt/system/filesystem.h>
 #include <yaml-cpp/yaml.h>
 
+// ------------
+#include <mrpt/containers/CDynamicGrid3D.h>
+
+class CPointCloudVoxelGrid
+{
+   public:
+    CPointCloudVoxelGrid() = default;
+
+    void resize(
+        const mrpt::math::TPoint3D& min_corner,
+        const mrpt::math::TPoint3D& max_corner, const float voxel_size)
+    {
+        pts_voxels.clear();
+        pts_voxels.setSize(
+            min_corner.x, max_corner.x, min_corner.y, max_corner.y,
+            min_corner.z, max_corner.z, voxel_size, voxel_size);
+    }
+
+    void processPointCloud(const mrpt::maps::CPointsMap& p)
+    {
+        const auto& xs   = p.getPointsBufferRef_x();
+        const auto& ys   = p.getPointsBufferRef_y();
+        const auto& zs   = p.getPointsBufferRef_z();
+        const auto  npts = xs.size();
+
+        for (std::size_t i = 0; i < npts; i++)
+        {
+            auto* c = pts_voxels.cellByPos(xs[i], ys[i], zs[i]);
+            if (c) c->indices.push_back(i);  // only if not out of grid range
+        }
+    }
+
+    void clear()
+    {
+        for (auto& c : pts_voxels) c.indices.clear();
+    }
+
+    /** The list of point indices in each voxel */
+    struct voxel_t
+    {
+        std::vector<std::size_t> indices;
+    };
+    using grid_t = mrpt::containers::CDynamicGrid3D<voxel_t, float>;
+
+    /** The point indices in each voxel. Directly access to each desired cell,
+     * use its iterator, etc. */
+    grid_t pts_voxels;
+};
+
+// ------------
+
 using namespace mola;
 
 MRPT_INITIALIZER(do_register){MOLA_REGISTER_MODULE(LidarICP)}
@@ -38,14 +89,6 @@ void LidarICP::initialize(const std::string& cfg_block)
 {
     MRPT_TRY_START
 
-    // Default params:
-    params_.mrpt_icp.maxIterations         = 50;
-    params_.mrpt_icp.skip_cov_calculation  = false;
-    params_.mrpt_icp.thresholdDist         = 1.25;
-    params_.mrpt_icp.thresholdAng          = mrpt::DEG2RAD(1.0);
-    params_.mrpt_icp.ALFA                  = 0.01;
-    params_.mrpt_icp.smallestThresholdDist = 0.05;
-
     // Load:
     auto c   = YAML::Load(cfg_block);
     auto cfg = c["params"];
@@ -55,12 +98,23 @@ void LidarICP::initialize(const std::string& cfg_block)
     YAML_LOAD_OPT(params_, min_time_between_scans, double);
     YAML_LOAD_OPT(params_, min_icp_goodness, double);
     YAML_LOAD_OPT(params_, decimate_to_point_count, unsigned int);
+    YAML_LOAD_OPT(params_, voxel_filter_resolution, double);
+    YAML_LOAD_OPT(params_, voxel_filter_max_e2_e0, double);
+    YAML_LOAD_OPT(params_, voxel_filter_max_e1_e0, double);
 
-    YAML_LOAD_OPT(params_, mrpt_icp.maxIterations, unsigned int);
-    YAML_LOAD_OPT(params_, mrpt_icp.thresholdDist, double);
-    YAML_LOAD_OPT_DEG(params_, mrpt_icp.thresholdAng, double);
-    YAML_LOAD_OPT(params_, mrpt_icp.ALFA, double);
-    YAML_LOAD_OPT(params_, mrpt_icp.smallestThresholdDist, double);
+    YAML_LOAD_OPT(params_, mrpt_icp_with_vel.maxIterations, unsigned int);
+    YAML_LOAD_OPT(params_, mrpt_icp_with_vel.thresholdDist, double);
+    YAML_LOAD_OPT_DEG(params_, mrpt_icp_with_vel.thresholdAng, double);
+    YAML_LOAD_OPT(params_, mrpt_icp_with_vel.ALFA, double);
+    YAML_LOAD_OPT(params_, mrpt_icp_with_vel.smallestThresholdDist, double);
+
+    params_.mrpt_icp_with_vel.onlyUniqueRobust = true;
+
+    YAML_LOAD_OPT(params_, mrpt_icp_without_vel.maxIterations, unsigned int);
+    YAML_LOAD_OPT(params_, mrpt_icp_without_vel.thresholdDist, double);
+    YAML_LOAD_OPT_DEG(params_, mrpt_icp_without_vel.thresholdAng, double);
+    YAML_LOAD_OPT(params_, mrpt_icp_without_vel.ALFA, double);
+    YAML_LOAD_OPT(params_, mrpt_icp_without_vel.smallestThresholdDist, double);
 
     YAML_LOAD_OPT(params_, debug_save_all_icp_results, bool);
 
@@ -129,12 +183,24 @@ void LidarICP::doProcessNewObservation(CObservation::Ptr& o)
             return;
         }
 
-        profiler_.enter("doProcessNewObservation.obs2pointcloud");
+        // Extract points from observation:
+        mrpt::maps::CPointsMap::Ptr this_obs_points;
+        bool                        have_points;
+        {
+            ProfilerEntry tle(
+                profiler_, "doProcessNewObservation.1.obs2pointcloud");
 
-        auto       this_obs_points = mrpt::maps::CSimplePointsMap::Create();
-        const bool have_points     = this_obs_points->insertObservationPtr(o);
+            this_obs_points = mrpt::maps::CSimplePointsMap::Create();
+            have_points     = this_obs_points->insertObservationPtr(o);
+        }
 
-        profiler_.leave("doProcessNewObservation.obs2pointcloud");
+        // Filter: keep corner areas only:
+        {
+            ProfilerEntry tle(
+                profiler_, "doProcessNewObservation.2.filter_pointclouds");
+
+            filterPointCloud(*this_obs_points);
+        }
 
         // Store for next step:
         auto last_obs_tim   = state_.last_obs_tim;
@@ -160,16 +226,8 @@ void LidarICP::doProcessNewObservation(CObservation::Ptr& o)
             return;
         }
 
-        MRPT_TODO("more generic filter!");
-        if (1)
-        {
-            ProfilerEntry tle(
-                profiler_, "doProcessNewObservation.filter_pointclouds");
-
-            this_obs_points->clipOutOfRangeInZ(-1.2f, 5.0f);
-        }
-
-        // Register point clouds using any of the available ICP algorithms:
+        // Register point clouds using ICP:
+        // ------------------------------------
         mrpt::poses::CPose3DPDFGaussian initial_guess;
         // Use velocity model for the initial guess:
         double dt = .0;
@@ -183,15 +241,22 @@ void LidarICP::doProcessNewObservation(CObservation::Ptr& o)
             state_.last_iter_twist.vz * dt, 0, 0, 0);
         MRPT_TODO("do omega_xyz part!");
 
-        icp_in.mrpt_icp_params = params_.mrpt_icp;  // all algo. params
-        icp_in.to_pc           = this_obs_points;
-        icp_in.from_pc         = last_points;
-        icp_in.from_id         = state_.last_kf;
-        icp_in.to_id = mola::INVALID_ID;  // current data, not a new KF (yet)
+        icp_in.to_pc   = this_obs_points;
+        icp_in.from_pc = last_points;
+        icp_in.from_id = state_.last_kf;
+        icp_in.to_id   = mola::INVALID_ID;  // current data, not a new KF (yet)
         icp_in.debug_str = "lidar_odometry";
 
+        // If we don't have a valid twist estimation, use a larger ICP
+        // correspondence threshold:
+        icp_in.mrpt_icp_params = state_.last_iter_twist_is_good
+                                     ? params_.mrpt_icp_with_vel
+                                     : params_.mrpt_icp_without_vel;
+
+        // Run ICP:
         {
-            ProfilerEntry tle(profiler_, "doProcessNewObservation.icp_latest");
+            ProfilerEntry tle(
+                profiler_, "doProcessNewObservation.3.icp_latest");
 
             run_one_icp(icp_in, icp_out);
         }
@@ -203,6 +268,8 @@ void LidarICP::doProcessNewObservation(CObservation::Ptr& o)
         state_.last_iter_twist.vy = rel_pose.y() / dt;
         state_.last_iter_twist.vz = rel_pose.z() / dt;
         MRPT_TODO("do omega_xyz part!");
+
+        state_.last_iter_twist_is_good = true;
 
         MRPT_LOG_DEBUG_STREAM(
             "Est.twist=" << state_.last_iter_twist.asString());
@@ -301,7 +368,7 @@ void LidarICP::doProcessNewObservation(CObservation::Ptr& o)
         if (can_check_for_other_matches)
         {
             ProfilerEntry tle(
-                profiler_, "doProcessNewObservation.checkForNearbyKFs");
+                profiler_, "doProcessNewObservation.4.checkForNearbyKFs");
             checkForNearbyKFs();
         }
     }
@@ -425,6 +492,8 @@ void LidarICP::doCheckForNonAdjacentKFs(std::shared_ptr<ICP_Input> d)
 {
     try
     {
+        ProfilerEntry tleg(profiler_, "doCheckForNonAdjacentKFs");
+
         // Call ICP:
         // Use current values for: state_.mrpt_icp.options
         mrpt::slam::CICP::TReturnInfo ret_info;
@@ -493,7 +562,6 @@ void LidarICP::run_one_icp(const ICP_Input& in, ICP_Output& out)
     using namespace std::string_literals;
 
     MRPT_START
-    // ProfilerEntry tleg(profiler_, "run_one_icp");
 
     // Call ICP:
     mrpt::slam::CICP mrpt_icp;
@@ -503,6 +571,10 @@ void LidarICP::run_one_icp(const ICP_Input& in, ICP_Output& out)
         unsigned decim = static_cast<unsigned>(
             in.to_pc->size() / params_.decimate_to_point_count);
         mrpt_icp.options.corresponding_points_decimation = decim;
+    }
+    else
+    {
+        mrpt_icp.options.corresponding_points_decimation = 1;
     }
 
     // Ensure kd-trees are built.
@@ -610,6 +682,99 @@ void LidarICP::run_one_icp(const ICP_Input& in, ICP_Output& out)
             MRPT_LOG_ERROR_STREAM(
                 "Error saving final ICP scene to :" << fil_name_final);
     }
+
+    MRPT_END
+}
+
+void LidarICP::filterPointCloud(mrpt::maps::CPointsMap& pc) const
+{
+    MRPT_START
+
+    static bool                 ini = false;
+    static CPointCloudVoxelGrid grid;
+    if (!ini)
+    {
+        ProfilerEntry tle(profiler_, "filterPointCloud_initialize");
+        ini = true;
+        grid.resize(
+            {-50.0, -50.0, -10.0}, {50.0, 50.0, 10.0},
+            params_.voxel_filter_resolution);
+    }
+
+    grid.clear();
+    grid.processPointCloud(pc);
+
+    const auto& xs = pc.getPointsBufferRef_x();
+    const auto& ys = pc.getPointsBufferRef_y();
+    const auto& zs = pc.getPointsBufferRef_z();
+
+    mrpt::maps::CSimplePointsMap filtered_points;
+
+    std::size_t nGoodVoxels = 0, nTotalVoxels = 0;
+    for (const auto& vxl_pts : grid.pts_voxels)
+    {
+        if (!vxl_pts.indices.empty()) nTotalVoxels++;
+        if (vxl_pts.indices.size() < 5) continue;
+
+        // Analyze the voxel contents:
+        mrpt::math::TPoint3Df mean{0, 0, 0};
+        const float           inv_n = (1.0f / vxl_pts.indices.size());
+        for (size_t i = 0; i < vxl_pts.indices.size(); i++)
+        {
+            const auto pt_idx = vxl_pts.indices[i];
+            mean.x += xs[pt_idx];
+            mean.y += ys[pt_idx];
+            mean.z += zs[pt_idx];
+        }
+        mean.x *= inv_n;
+        mean.y *= inv_n;
+        mean.z *= inv_n;
+
+        Eigen::Matrix3f mat_a;
+        mat_a.setZero();
+        for (size_t i = 0; i < vxl_pts.indices.size(); i++)
+        {
+            const auto                  pt_idx = vxl_pts.indices[i];
+            const mrpt::math::TPoint3Df a{
+                xs[pt_idx] - mean.x, ys[pt_idx] - mean.y, zs[pt_idx] - mean.z};
+            mat_a(0, 0) += a.x * a.x;
+            mat_a(1, 0) += a.x * a.y;
+            mat_a(2, 0) += a.x * a.z;
+            mat_a(1, 1) += a.y * a.y;
+            mat_a(2, 1) += a.y * a.z;
+            mat_a(2, 2) += a.z * a.z;
+        }
+        mat_a *= inv_n;
+
+        // This only looks at the lower-triangular part of the cov
+        // matrix (which is wrong in loam_velodyne!)
+        Eigen::SelfAdjointEigenSolver<Eigen::Matrix3f> esolver(mat_a);
+
+        const Eigen::Vector3f eig_vals = esolver.eigenvalues();
+
+        const float e0 = eig_vals[0], e1 = eig_vals[1], e2 = eig_vals[2];
+
+        if (e2 < params_.voxel_filter_max_e2_e0 * e0 &&
+            e1 < params_.voxel_filter_max_e1_e0 * e0)
+        {
+            nGoodVoxels++;
+            for (size_t i = 0; i < vxl_pts.indices.size(); i++)
+            {
+                const auto pt_idx = vxl_pts.indices[i];
+                filtered_points.insertPointFast(
+                    xs[pt_idx], ys[pt_idx], zs[pt_idx]);
+            }
+        }
+    }
+    MRPT_LOG_DEBUG_STREAM(
+        "VoxelGridFilter: good voxels=" << nGoodVoxels << " out of "
+                                        << nTotalVoxels);
+
+    // Replace original -> filtered pointcloud:
+    MRPT_TODO("impl std::move for pointclouds");
+    //*this_obs_points = std::move(filtered_points);
+    pc.clear();
+    pc.addFrom(filtered_points);
 
     MRPT_END
 }

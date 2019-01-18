@@ -56,9 +56,16 @@ class LidarICP : public FrontEndBase
          * number of points */
         unsigned int decimate_to_point_count{500};
 
+        /** Size of the voxel filter [meters] */
+        double voxel_filter_resolution{.5};
+        double voxel_filter_max_e2_e0{30.}, voxel_filter_max_e1_e0{30.};
+
         unsigned int max_KFs_local_graph{1000};
 
-        mrpt::slam::CICP::TConfigParams mrpt_icp{};
+        /** ICP parameters for the case of having, or not, a good velocity model
+         * that works a good prior */
+        mrpt::slam::CICP::TConfigParams mrpt_icp_with_vel{},
+            mrpt_icp_without_vel{};
 
         bool debug_save_all_icp_results{false};
     };
@@ -71,7 +78,7 @@ class LidarICP : public FrontEndBase
     mola::WorkerThreadsPool worker_pool_{1};
 
     /** Worker thread to align a new KF against past KFs:*/
-    mola::WorkerThreadsPool worker_pool_past_KFs_{3};
+    mola::WorkerThreadsPool worker_pool_past_KFs_{1};
 
     /** All variables that hold the algorithm state */
     struct MethodState
@@ -80,6 +87,7 @@ class LidarICP : public FrontEndBase
         mrpt::maps::CPointsMap::Ptr last_points{};
         CObservation::Ptr           last_obs{};
         mrpt::math::TTwist3D        last_iter_twist;
+        bool                        last_iter_twist_is_good{false};
         id_t                        last_kf{mola::INVALID_ID};
         mrpt::poses::CPose3D        accum_since_last_kf{};
 
@@ -132,6 +140,8 @@ class LidarICP : public FrontEndBase
      * the quality of the estimation by increasing the pose-graph density.
      */
     void doCheckForNonAdjacentKFs(std::shared_ptr<ICP_Input> d);
+
+    void filterPointCloud(mrpt::maps::CPointsMap& pc) const;
 
     std::mutex local_pose_graph_mtx;
 };
