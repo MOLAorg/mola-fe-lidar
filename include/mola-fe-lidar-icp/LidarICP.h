@@ -78,7 +78,7 @@ class LidarICP : public FrontEndBase
     mola::WorkerThreadsPool worker_pool_{1};
 
     /** Worker thread to align a new KF against past KFs:*/
-    mola::WorkerThreadsPool worker_pool_past_KFs_{1};
+    mola::WorkerThreadsPool worker_pool_past_KFs_{3};
 
     /** All variables that hold the algorithm state */
     struct MethodState
@@ -102,13 +102,9 @@ class LidarICP : public FrontEndBase
         };
 
         LocalPoseGraph local_pose_graph;
-
-        // Debug aux variables:
-        unsigned int debug_dump_icp_file_counter{0};
     };
 
-    MethodState state_;
-
+    MethodState     state_;
     WorldModel::Ptr worldmodel_;
 
     /** Here happens the actual processing, invoked from the worker thread pool
@@ -144,6 +140,9 @@ class LidarICP : public FrontEndBase
     void filterPointCloud(mrpt::maps::CPointsMap& pc) const;
 
     std::mutex local_pose_graph_mtx;
+
+    // Debug aux variables:
+    std::atomic<unsigned int> debug_dump_icp_file_counter{0};
 };
 
 }  // namespace mola

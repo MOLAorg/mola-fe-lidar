@@ -18,8 +18,12 @@
 
 #include <mola-fe-lidar-icp/LidarICP.h>
 #include <mola-kernel/yaml_helpers.h>
+#include <mrpt/config/CConfigFileMemory.h>
 #include <mrpt/core/initializer.h>
 #include <mrpt/maps/CSimplePointsMap.h>
+#include <mrpt/obs/CObservationComment.h>
+#include <mrpt/obs/CObservationPointCloud.h>
+#include <mrpt/obs/CRawlog.h>
 #include <mrpt/opengl/COpenGLScene.h>
 #include <mrpt/opengl/CText.h>
 #include <mrpt/opengl/stock_objects.h>
@@ -107,8 +111,6 @@ void LidarICP::initialize(const std::string& cfg_block)
     YAML_LOAD_OPT_DEG(params_, mrpt_icp_with_vel.thresholdAng, double);
     YAML_LOAD_OPT(params_, mrpt_icp_with_vel.ALFA, double);
     YAML_LOAD_OPT(params_, mrpt_icp_with_vel.smallestThresholdDist, double);
-
-    params_.mrpt_icp_with_vel.onlyUniqueRobust = true;
 
     YAML_LOAD_OPT(params_, mrpt_icp_without_vel.maxIterations, unsigned int);
     YAML_LOAD_OPT(params_, mrpt_icp_without_vel.thresholdDist, double);
@@ -421,8 +423,8 @@ void LidarICP::checkForNearbyKFs()
 
     // Pick the node at an intermediary distance and try to align
     // against it:
-    const double min_dist_to_test = 4.0;
-    const double max_dist_to_test = 10.0;
+    const double min_dist_to_test = 5.0;
+    const double max_dist_to_test = 25.0;
 
     auto it1 = KF_distances.lower_bound(min_dist_to_test);
     auto it2 = KF_distances.upper_bound(max_dist_to_test);
@@ -605,10 +607,10 @@ void LidarICP::run_one_icp(const ICP_Input& in, ICP_Output& out)
     if (params_.debug_save_all_icp_results)
     {
         auto fil_name_prefix = mrpt::system::fileNameStripInvalidChars(
-            getModuleInstanceName() +
-            mrpt::format(
-                "_debug_ICP_%s_%05u", in.debug_str.c_str(),
-                state_.debug_dump_icp_file_counter++));
+            getModuleInstanceName() + mrpt::format(
+                                          "_debug_ICP_%s_%05u",
+                                          in.debug_str.c_str(),
+                                          debug_dump_icp_file_counter++));
 
         // Init:
         mrpt::opengl::COpenGLScene scene;
@@ -681,6 +683,36 @@ void LidarICP::run_one_icp(const ICP_Input& in, ICP_Output& out)
         else
             MRPT_LOG_ERROR_STREAM(
                 "Error saving final ICP scene to :" << fil_name_final);
+
+        // Also: save as Rawlog for ICP debugging in RawLogViewer app:
+        {
+            mrpt::obs::CRawlog rawlog;
+            {
+                auto pc1         = mrpt::obs::CObservationPointCloud::Create();
+                pc1->pointcloud  = in.from_pc;
+                pc1->sensorLabel = "from";
+                rawlog.addObservationMemoryReference(pc1);
+            }
+            {
+                auto pc2         = mrpt::obs::CObservationPointCloud::Create();
+                pc2->pointcloud  = in.to_pc;
+                pc2->sensorLabel = "to";
+                rawlog.addObservationMemoryReference(pc2);
+            }
+            {
+                mrpt::config::CConfigFileMemory cfg;
+                in.mrpt_icp_params.saveToConfigFile(cfg, "ICP");
+
+                auto comm  = mrpt::obs::CObservationComment::Create();
+                comm->text = cfg.getContent();
+                rawlog.addObservationMemoryReference(comm);
+            }
+
+            const auto fil_name_rawlog = fil_name_prefix + ".rawlog"s;
+            if (rawlog.saveToRawLogFile(fil_name_rawlog))
+                MRPT_LOG_DEBUG_STREAM(
+                    "Wrote ICP debug rawlog: " << fil_name_rawlog);
+        }
     }
 
     MRPT_END
