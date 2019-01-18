@@ -17,6 +17,7 @@
 #include <mrpt/maps/CPointsMap.h>
 #include <mrpt/slam/CICP.h>
 #include <mutex>
+#include "CPointCloudVoxelGrid.h"
 
 namespace mola
 {
@@ -80,23 +81,32 @@ class LidarICP : public FrontEndBase
     /** Worker thread to align a new KF against past KFs:*/
     mola::WorkerThreadsPool worker_pool_past_KFs_{3};
 
+    struct pointclouds_t
+    {
+        /** The original pointcloud, with all points */
+        mrpt::maps::CPointsMap::Ptr original{};
+
+        /** A reduced point count version, with the key features only */
+        mrpt::maps::CPointsMap::Ptr sampled{};
+    };
+
     /** All variables that hold the algorithm state */
     struct MethodState
     {
-        mrpt::Clock::time_point     last_obs_tim{};
-        mrpt::maps::CPointsMap::Ptr last_points{};
-        CObservation::Ptr           last_obs{};
-        mrpt::math::TTwist3D        last_iter_twist;
-        bool                        last_iter_twist_is_good{false};
-        id_t                        last_kf{mola::INVALID_ID};
-        mrpt::poses::CPose3D        accum_since_last_kf{};
+        mrpt::Clock::time_point last_obs_tim{};
+        pointclouds_t           last_points{};
+        mrpt::math::TTwist3D    last_iter_twist;
+        bool                    last_iter_twist_is_good{false};
+        id_t                    last_kf{mola::INVALID_ID};
+        mrpt::poses::CPose3D    accum_since_last_kf{};
+        CPointCloudVoxelGrid    filter_grid;
 
         // An auxiliary (local) pose-graph to use Dijkstra and find guesses
         // for ICP against nearby past KFs:
         struct LocalPoseGraph
         {
-            mrpt::graphs::CNetworkOfPoses3D                              graph;
-            std::map<mrpt::graphs::TNodeID, mrpt::maps::CPointsMap::Ptr> pcs;
+            mrpt::graphs::CNetworkOfPoses3D                graph;
+            std::map<mrpt::graphs::TNodeID, pointclouds_t> pcs;
             /** Pairs of KFs that have been already checked for loop closure */
             std::set<std::pair<id_t, id_t>> checked_KF_pairs;
         };
@@ -114,12 +124,12 @@ class LidarICP : public FrontEndBase
 
     struct ICP_Input
     {
-        id_t                        to_id{mola::INVALID_ID};
-        id_t                        from_id{mola::INVALID_ID};
-        mrpt::maps::CPointsMap::Ptr to_pc{}, from_pc{};
-        mrpt::math::TPose3D         init_guess_to_wrt_from;
+        id_t                to_id{mola::INVALID_ID};
+        id_t                from_id{mola::INVALID_ID};
+        pointclouds_t       to_pc, from_pc;
+        mrpt::math::TPose3D init_guess_to_wrt_from;
 
-        mrpt::slam::CICP::TConfigParams mrpt_icp_params{};
+        mrpt::slam::CICP::TConfigParams mrpt_icp_params;
 
         /** used to identity where does this request come from */
         std::string debug_str;
@@ -137,7 +147,8 @@ class LidarICP : public FrontEndBase
      */
     void doCheckForNonAdjacentKFs(std::shared_ptr<ICP_Input> d);
 
-    void filterPointCloud(mrpt::maps::CPointsMap& pc) const;
+    void filterPointCloud(
+        const mrpt::maps::CPointsMap& pc, mrpt::maps::CPointsMap& pc_out);
 
     std::mutex local_pose_graph_mtx;
 
