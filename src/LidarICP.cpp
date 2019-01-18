@@ -240,7 +240,8 @@ void LidarICP::doProcessNewObservation(CObservation::Ptr& o)
         ICP_Input  icp_in;
         icp_in.init_guess_to_wrt_from = mrpt::math::TPose3D(
             state_.last_iter_twist.vx * dt, state_.last_iter_twist.vy * dt,
-            state_.last_iter_twist.vz * dt, 0, 0, 0);
+		    state_.last_iter_twist.vz * dt, state_.last_iter_twist.wz * dt, 0,
+		    0);
         MRPT_TODO("do omega_xyz part!");
 
         icp_in.to_pc   = this_obs_points;
@@ -269,6 +270,7 @@ void LidarICP::doProcessNewObservation(CObservation::Ptr& o)
         state_.last_iter_twist.vx = rel_pose.x() / dt;
         state_.last_iter_twist.vy = rel_pose.y() / dt;
         state_.last_iter_twist.vz = rel_pose.z() / dt;
+		state_.last_iter_twist.wz = rel_pose.yaw() / dt;
         MRPT_TODO("do omega_xyz part!");
 
         state_.last_iter_twist_is_good = true;
@@ -423,8 +425,8 @@ void LidarICP::checkForNearbyKFs()
 
     // Pick the node at an intermediary distance and try to align
     // against it:
-    const double min_dist_to_test = 5.0;
-    const double max_dist_to_test = 25.0;
+	const double min_dist_to_test = 2 * params_.min_dist_xyz_between_keyframes;
+	const double max_dist_to_test = 4 * params_.min_dist_xyz_between_keyframes;
 
     auto it1 = KF_distances.lower_bound(min_dist_to_test);
     auto it2 = KF_distances.upper_bound(max_dist_to_test);
