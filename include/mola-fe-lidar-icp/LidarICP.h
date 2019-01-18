@@ -56,7 +56,7 @@ class LidarICP : public FrontEndBase
          * number of points */
         unsigned int decimate_to_point_count{500};
 
-        unsigned int max_KFs_local_graph{8};
+        unsigned int max_KFs_local_graph{1000};
 
         mrpt::slam::CICP::TConfigParams mrpt_icp{};
 
@@ -71,8 +71,7 @@ class LidarICP : public FrontEndBase
     mola::WorkerThreadsPool worker_pool_{1};
 
     /** Worker thread to align a new KF against past KFs:*/
-    mola::WorkerThreadsPool worker_pool_past_KFs_{
-        2, mola::WorkerThreadsPool::POLICY_DROP_OLD};
+    mola::WorkerThreadsPool worker_pool_past_KFs_{3};
 
     /** All variables that hold the algorithm state */
     struct MethodState
@@ -86,10 +85,15 @@ class LidarICP : public FrontEndBase
 
         // An auxiliary (local) pose-graph to use Dijkstra and find guesses
         // for ICP against nearby past KFs:
-        mrpt::graphs::CNetworkOfPoses3D local_pose_graph;
-        std::map<mrpt::graphs::TNodeID, mrpt::maps::CPointsMap::Ptr> local_pcs;
-        /** Pairs of KFs that have been already checked for loop closure */
-        std::set<std::pair<id_t, id_t>> checked_KF_pairs;
+        struct LocalPoseGraph
+        {
+            mrpt::graphs::CNetworkOfPoses3D                              graph;
+            std::map<mrpt::graphs::TNodeID, mrpt::maps::CPointsMap::Ptr> pcs;
+            /** Pairs of KFs that have been already checked for loop closure */
+            std::set<std::pair<id_t, id_t>> checked_KF_pairs;
+        };
+
+        LocalPoseGraph local_pose_graph;
 
         // Debug aux variables:
         unsigned int debug_dump_icp_file_counter{0};
@@ -110,6 +114,9 @@ class LidarICP : public FrontEndBase
         id_t                        from_id{mola::INVALID_ID};
         mrpt::maps::CPointsMap::Ptr to_pc{}, from_pc{};
         mrpt::math::TPose3D         init_guess_to_wrt_from;
+
+        mrpt::slam::CICP::TConfigParams mrpt_icp_params{};
+
         /** used to identity where does this request come from */
         std::string debug_str;
     };
@@ -124,9 +131,9 @@ class LidarICP : public FrontEndBase
      * to check for additional edges apart of the "odometry edge", to increase
      * the quality of the estimation by increasing the pose-graph density.
      */
-    void doCheckForNonAdjacentKFs(const std::shared_ptr<ICP_Input>& d);
+    void doCheckForNonAdjacentKFs(std::shared_ptr<ICP_Input> d);
 
-    std::mutex kdtree_build_mtx_;
+    std::mutex local_pose_graph_mtx;
 };
 
 }  // namespace mola

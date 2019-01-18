@@ -39,11 +39,12 @@ void LidarICP::initialize(const std::string& cfg_block)
     MRPT_TRY_START
 
     // Default params:
-    params_.mrpt_icp.maxIterations        = 50;
-    params_.mrpt_icp.skip_cov_calculation = false;
-    params_.mrpt_icp.thresholdDist        = 1.25;
-    params_.mrpt_icp.thresholdAng         = mrpt::DEG2RAD(1.0);
-    params_.mrpt_icp.ALFA                 = 0.01;
+    params_.mrpt_icp.maxIterations         = 50;
+    params_.mrpt_icp.skip_cov_calculation  = false;
+    params_.mrpt_icp.thresholdDist         = 1.25;
+    params_.mrpt_icp.thresholdAng          = mrpt::DEG2RAD(1.0);
+    params_.mrpt_icp.ALFA                  = 0.01;
+    params_.mrpt_icp.smallestThresholdDist = 0.05;
 
     // Load:
     auto c   = YAML::Load(cfg_block);
@@ -58,6 +59,8 @@ void LidarICP::initialize(const std::string& cfg_block)
     YAML_LOAD_OPT(params_, mrpt_icp.maxIterations, unsigned int);
     YAML_LOAD_OPT(params_, mrpt_icp.thresholdDist, double);
     YAML_LOAD_OPT_DEG(params_, mrpt_icp.thresholdAng, double);
+    YAML_LOAD_OPT(params_, mrpt_icp.ALFA, double);
+    YAML_LOAD_OPT(params_, mrpt_icp.smallestThresholdDist, double);
 
     YAML_LOAD_OPT(params_, debug_save_all_icp_results, bool);
 
@@ -157,13 +160,13 @@ void LidarICP::doProcessNewObservation(CObservation::Ptr& o)
             return;
         }
 
-        if (0)
+        MRPT_TODO("more generic filter!");
+        if (1)
         {
             ProfilerEntry tle(
                 profiler_, "doProcessNewObservation.filter_pointclouds");
 
             this_obs_points->clipOutOfRangeInZ(-1.2f, 5.0f);
-            last_points->clipOutOfRangeInZ(-1.2f, 5.0f);
         }
 
         // Register point clouds using any of the available ICP algorithms:
@@ -180,10 +183,11 @@ void LidarICP::doProcessNewObservation(CObservation::Ptr& o)
             state_.last_iter_twist.vz * dt, 0, 0, 0);
         MRPT_TODO("do omega_xyz part!");
 
-        icp_in.to_pc   = this_obs_points;
-        icp_in.from_pc = last_points;
-        icp_in.from_id = state_.last_kf;
-        icp_in.to_id   = mola::INVALID_ID;  // current data, not a new KF (yet)
+        icp_in.mrpt_icp_params = params_.mrpt_icp;  // all algo. params
+        icp_in.to_pc           = this_obs_points;
+        icp_in.from_pc         = last_points;
+        icp_in.from_id         = state_.last_kf;
+        icp_in.to_id = mola::INVALID_ID;  // current data, not a new KF (yet)
         icp_in.debug_str = "lidar_odometry";
 
         {
@@ -200,11 +204,6 @@ void LidarICP::doProcessNewObservation(CObservation::Ptr& o)
         state_.last_iter_twist.vz = rel_pose.z() / dt;
         MRPT_TODO("do omega_xyz part!");
 
-        MRPT_LOG_DEBUG_STREAM(
-            "Cur point count="
-            << this_obs_points->size()
-            << " last point count=" << last_points->size() << " decimation="
-            << params_.mrpt_icp.corresponding_points_decimation);
         MRPT_LOG_DEBUG_STREAM(
             "Est.twist=" << state_.last_iter_twist.asString());
         MRPT_LOG_DEBUG_STREAM(
@@ -228,9 +227,8 @@ void LidarICP::doProcessNewObservation(CObservation::Ptr& o)
 
             kf.timestamp = this_obs_tim;
             {
-                mrpt::obs::CSensoryFrame sf;
+                mrpt::obs::CSensoryFrame& sf = kf.observations.emplace();
                 sf.push_back(o);
-                kf.observations = std::move(sf);
             }
 
             std::future<BackEndBase::ProposeKF_Output> kf_out_fut;
@@ -244,8 +242,13 @@ void LidarICP::doProcessNewObservation(CObservation::Ptr& o)
                 kf_out.new_kf_id &&
                 kf_out.new_kf_id.value() != mola::INVALID_ID);
 
-            // Add point cloud to local graph:
-            state_.local_pcs[kf_out.new_kf_id.value()] = this_obs_points;
+            {
+                std::lock_guard<std::mutex> lck(local_pose_graph_mtx);
+
+                // Add point cloud to local graph:
+                state_.local_pose_graph.pcs[kf_out.new_kf_id.value()] =
+                    this_obs_points;
+            }
 
             // 2) New SE(3) constraint between consecutive Keyframes:
             if (state_.last_kf != mola::INVALID_ID)
@@ -265,10 +268,14 @@ void LidarICP::doProcessNewObservation(CObservation::Ptr& o)
                     factor_out.new_factor_id &&
                     factor_out.new_factor_id != mola::INVALID_FID);
 
-                // Append to local graph as well::
-                state_.local_pose_graph.insertEdgeAtEnd(
-                    state_.last_kf, *kf_out.new_kf_id,
-                    state_.accum_since_last_kf);
+                // Append to local graph as well:
+                {
+                    std::lock_guard<std::mutex> lck(local_pose_graph_mtx);
+
+                    state_.local_pose_graph.graph.insertEdgeAtEnd(
+                        state_.last_kf, *kf_out.new_kf_id,
+                        state_.accum_since_last_kf);
+                }
             }
 
             // Done.
@@ -284,11 +291,17 @@ void LidarICP::doProcessNewObservation(CObservation::Ptr& o)
         // Now, let's try to align this new KF against a few past KFs as well.
         // we'll do it in separate threads, with priorities so the latest KFs
         // are always attended first:
-        if (state_.local_pcs.size() > 1)
+        bool can_check_for_other_matches = true;
+        {
+            std::lock_guard<std::mutex> lck(local_pose_graph_mtx);
+            can_check_for_other_matches =
+                (state_.local_pose_graph.pcs.size() > 1);
+        }
+
+        if (can_check_for_other_matches)
         {
             ProfilerEntry tle(
                 profiler_, "doProcessNewObservation.checkForNearbyKFs");
-
             checkForNearbyKFs();
         }
     }
@@ -303,57 +316,64 @@ void LidarICP::checkForNearbyKFs()
     MRPT_START
 
     // Run Dijkstra wrt to the last KF:
-    auto& lpg = state_.local_pose_graph;
-
-    lpg.root = state_.last_kf;
-    lpg.nodes.clear();
-    lpg.nodes[lpg.root] = mrpt::poses::CPose3D::Identity();
-    lpg.dijkstra_nodes_estimate();
-
-    // Remove too distant KFs: they belong to "loop closure", not to
-    // "lidar odometry"!
     std::map<double, mrpt::graphs::TNodeID> KF_distances;
-    for (const auto& kfs : lpg.nodes)
-        KF_distances[kfs.second.norm()] = kfs.first;
-
-    std::map<mrpt::graphs::TNodeID, std::set<mrpt::graphs::TNodeID>> adj;
-    lpg.getAdjacencyMatrix(adj);
-
-    while (lpg.nodes.size() > params_.max_KFs_local_graph)
+    mola::id_t                              last_kf_id{mola::INVALID_ID};
     {
-        const auto id_to_remove = KF_distances.rbegin()->second;
-        KF_distances.erase(std::prev(KF_distances.end()));
+        std::lock_guard<std::mutex> lck(local_pose_graph_mtx);
 
-        lpg.nodes.erase(id_to_remove);
-        state_.local_pcs.erase(id_to_remove);
-        for (const auto other_id : adj[id_to_remove])
+        auto& lpg  = state_.local_pose_graph.graph;
+        last_kf_id = state_.last_kf;
+
+        lpg.root = last_kf_id;
+        lpg.nodes.clear();
+        lpg.nodes[lpg.root] = mrpt::poses::CPose3D::Identity();
+        lpg.dijkstra_nodes_estimate();
+
+        // Remove too distant KFs: they belong to "loop closure", not to
+        // "lidar odometry"!
+        for (const auto& kfs : lpg.nodes)
+            KF_distances[kfs.second.norm()] = kfs.first;
+
+        std::map<mrpt::graphs::TNodeID, std::set<mrpt::graphs::TNodeID>> adj;
+        lpg.getAdjacencyMatrix(adj);
+
+        while (lpg.nodes.size() > params_.max_KFs_local_graph)
         {
-            lpg.edges.erase(std::make_pair(id_to_remove, other_id));
-            lpg.edges.erase(std::make_pair(other_id, id_to_remove));
+            const auto id_to_remove = KF_distances.rbegin()->second;
+            KF_distances.erase(std::prev(KF_distances.end()));
+
+            lpg.nodes.erase(id_to_remove);
+            state_.local_pose_graph.pcs.erase(id_to_remove);
+            for (const auto other_id : adj[id_to_remove])
+            {
+                lpg.edges.erase(std::make_pair(id_to_remove, other_id));
+                lpg.edges.erase(std::make_pair(other_id, id_to_remove));
+            }
         }
     }
 
-    if (!KF_distances.empty())
-    {
-        // Pick the node at an intermediary distance and try to align
-        // against it:
-        auto it = KF_distances.begin();
-        std::advance(it, KF_distances.size() * 0.75);
-        const auto kf_id = it->second;
+    // Pick the node at an intermediary distance and try to align
+    // against it:
+    const double min_dist_to_test = 4.0;
+    const double max_dist_to_test = 10.0;
 
-        bool edge_already_exists =
-            (std::abs(
-                 static_cast<int64_t>(kf_id) - static_cast<int64_t>(lpg.root)) <
-             2);
+    auto it1 = KF_distances.lower_bound(min_dist_to_test);
+    auto it2 = KF_distances.upper_bound(max_dist_to_test);
+
+    for (auto it = it1; it != it2; ++it)
+    {
+        const auto kf_id               = it->second;
+        bool       edge_already_exists = false;
 
         // Already sent out for checking?
         const auto pair_ids = std::make_pair(
-            std::min(kf_id, lpg.root), std::max(kf_id, lpg.root));
+            std::min(kf_id, last_kf_id), std::max(kf_id, last_kf_id));
 
-        if (state_.checked_KF_pairs.count(pair_ids) != 0)
         {
-            // Yes:
-            edge_already_exists = true;
+            std::lock_guard<std::mutex> lck(local_pose_graph_mtx);
+
+            if (state_.local_pose_graph.checked_KF_pairs.count(pair_ids) != 0)
+                edge_already_exists = true;
         }
 
         MRPT_TODO("Factors should have an annotation to know who created them");
@@ -362,45 +382,49 @@ void LidarICP::checkForNearbyKFs()
         if (!edge_already_exists && worldmodel_)
         {
             worldmodel_->entities_lock();
+            worldmodel_->factors_lock();
+
             const auto connected = worldmodel_->entity_neighbors(kf_id);
-            if (connected.count(lpg.root) != 0)
+            if (connected.count(last_kf_id) != 0)
             {
                 MRPT_LOG_DEBUG_STREAM(
                     "[checkForNearbyKFs] Discarding pair check since a factor "
                     "already exists between #"
-                    << kf_id << " <==> #" << lpg.root);
+                    << kf_id << " <==> #" << last_kf_id);
                 edge_already_exists = false;
             }
 
+            worldmodel_->factors_unlock();
             worldmodel_->entities_unlock();
         }
 
         if (!edge_already_exists)
         {
-            auto d                    = std::make_shared<ICP_Input>();
-            d->to_id                  = kf_id;
-            d->from_id                = lpg.root;
-            d->to_pc                  = state_.local_pcs[d->to_id];
-            d->from_pc                = state_.local_pcs[d->from_id];
-            d->init_guess_to_wrt_from = lpg.nodes[kf_id].asTPose();
+            std::lock_guard<std::mutex> lck(local_pose_graph_mtx);
+
+            auto d     = std::make_shared<ICP_Input>();
+            d->to_id   = kf_id;
+            d->from_id = last_kf_id;
+            d->to_pc   = state_.local_pose_graph.pcs[d->to_id];
+            d->from_pc = state_.local_pose_graph.pcs[d->from_id];
+            d->init_guess_to_wrt_from =
+                state_.local_pose_graph.graph.nodes[kf_id].asTPose();
 
             worker_pool_past_KFs_.enqueue(
                 &LidarICP::doCheckForNonAdjacentKFs, this, d);
 
             // Mark as sent for check:
-            state_.checked_KF_pairs.insert(pair_ids);
+            state_.local_pose_graph.checked_KF_pairs.insert(pair_ids);
         }
     }
 
     MRPT_END
 }
 
-void LidarICP::doCheckForNonAdjacentKFs(const std::shared_ptr<ICP_Input>& d)
+void LidarICP::doCheckForNonAdjacentKFs(std::shared_ptr<ICP_Input> d)
 {
     try
     {
-        ProfilerEntry tleg(profiler_, "doCheckForNonAdjacentKFs");
-
         // Call ICP:
         // Use current values for: state_.mrpt_icp.options
         mrpt::slam::CICP::TReturnInfo ret_info;
@@ -410,8 +434,6 @@ void LidarICP::doCheckForNonAdjacentKFs(const std::shared_ptr<ICP_Input>& d)
         ICP_Output icp_out;
         d->debug_str = "doCheckForNonAdjacentKFs";
         {
-            ProfilerEntry tle(profiler_, "doCheckForNonAdjacentKFs.icp");
-
             run_one_icp(*d, icp_out);
         }
         const mrpt::poses::CPose3D rel_pose =
@@ -453,8 +475,11 @@ void LidarICP::doCheckForNonAdjacentKFs(const std::shared_ptr<ICP_Input>& d)
                 factor_out.new_factor_id != mola::INVALID_FID);
 
             // Append to local graph as well::
-            state_.local_pose_graph.insertEdgeAtEnd(
-                d->from_id, d->to_id, rel_pose);
+            {
+                std::lock_guard<std::mutex> lck(local_pose_graph_mtx);
+                state_.local_pose_graph.graph.insertEdgeAtEnd(
+                    d->from_id, d->to_id, rel_pose);
+            }
         }
     }
     catch (const std::exception& e)
@@ -468,11 +493,11 @@ void LidarICP::run_one_icp(const ICP_Input& in, ICP_Output& out)
     using namespace std::string_literals;
 
     MRPT_START
-    ProfilerEntry tleg(profiler_, "run_one_icp");
+    // ProfilerEntry tleg(profiler_, "run_one_icp");
 
     // Call ICP:
     mrpt::slam::CICP mrpt_icp;
-    mrpt_icp.options = params_.mrpt_icp;
+    mrpt_icp.options = in.mrpt_icp_params;
     if (params_.decimate_to_point_count > 0)
     {
         unsigned decim = static_cast<unsigned>(
@@ -480,18 +505,10 @@ void LidarICP::run_one_icp(const ICP_Input& in, ICP_Output& out)
         mrpt_icp.options.corresponding_points_decimation = decim;
     }
 
-    {
-        ProfilerEntry tle(profiler_, "run_one_icp.build_kd_tree");
-
-        std::lock_guard<std::mutex> lck(kdtree_build_mtx_);
-
-        // Ensure the kd-tree is built.
-        // It's important to enfore it to be build now in a single thread,
-        // before the pointclouds go to different threads, which may cause
-        // mem corruption:
-        in.from_pc->kdTreeEnsureIndexBuilt3D();
-        in.to_pc->kdTreeEnsureIndexBuilt3D();
-    }
+    // Ensure kd-trees are built.
+    // kd-trees have each own mutexes to ensure well-defined behavior:
+    in.from_pc->kdTreeEnsureIndexBuilt3D();
+    in.to_pc->kdTreeEnsureIndexBuilt3D();
 
     mrpt::poses::CPose3DPDFGaussian initial_guess;
     initial_guess.mean = mrpt::poses::CPose3D(in.init_guess_to_wrt_from);
@@ -506,6 +523,10 @@ void LidarICP::run_one_icp(const ICP_Input& in, ICP_Output& out)
         "MRPT ICP: goodness=%.03f iters=%u rel_pose=%s", out.goodness,
         ret_info.nIterations,
         out.found_pose_to_wrt_from->getMeanVal().asString().c_str());
+    MRPT_LOG_DEBUG_STREAM(
+        "MRPT ICP: `to` point count="
+        << in.to_pc->size() << " `from` point count=" << in.from_pc->size()
+        << " decimation=" << mrpt_icp.options.corresponding_points_decimation);
 
     // -------------------------------------------------
     // Save debug files for debugging ICP quality
