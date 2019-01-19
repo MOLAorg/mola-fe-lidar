@@ -472,12 +472,15 @@ void LidarICP::checkForNearbyKFs()
             if (kf_topo_d < MIN_DIST_TO_CONSIDER_LOOP_CLOSURE)
             {
                 // Regular, nearby KF-to-KF ICP check:
-                d->debug_str = "extra_edge"s;
+                d->debug_str           = "extra_edge"s;
+                icp_in.mrpt_icp_params = params_.mrpt_icp_with_vel;
             }
             else
             {
                 // Attempt to close a loop:
-                d->debug_str = "loop_closure"s;
+                d->debug_str           = "loop_closure"s;
+                icp_in.mrpt_icp_params = params_.mrpt_icp_without_vel;
+
                 MRPT_LOG_WARN_STREAM(
                     "Attempting to close a loop between KFs #"
                     << kf_id << " <==> #" << current_kf_id);
@@ -581,7 +584,6 @@ void LidarICP::run_one_icp(const ICP_Input& in, ICP_Output& out)
 
     for (int pass = 0; pass <= 1; pass++)
     {
-        //
         // Call ICP:
         mrpt_icp.options = in.mrpt_icp_params;
         auto& from_pc    = pass == 0 ? in.from_pc.sampled : in.from_pc.original;
@@ -630,6 +632,8 @@ void LidarICP::run_one_icp(const ICP_Input& in, ICP_Output& out)
     profiler_.registerUserMeasure("run_one_icp", t_end - t_start);
 
     // -------------------------------------------------
+    MRPT_TODO("Move this to its own method");
+
     // Save debug files for debugging ICP quality
     bool gen_debug =
         (in.debug_str == "lidar_odom"s && params_.debug_save_lidar_odometry) ||
@@ -719,7 +723,6 @@ void LidarICP::run_one_icp(const ICP_Input& in, ICP_Output& out)
                 "Error saving final ICP scene to :" << fil_name_final);
 
         // Also: save as Rawlog for ICP debugging in RawLogViewer app:
-        if (0)
         {
             mrpt::obs::CRawlog rawlog;
             {
