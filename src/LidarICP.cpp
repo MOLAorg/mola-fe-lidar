@@ -48,8 +48,11 @@ void LidarICP::initialize(const std::string& cfg_block)
     MRPT_LOG_DEBUG_STREAM("Loading these params:\n" << cfg);
 
     YAML_LOAD_REQ(params_, min_dist_xyz_between_keyframes, double);
+    YAML_LOAD_OPT_DEG(params_, min_rotation_between_keyframes, double);
+
     YAML_LOAD_OPT(params_, min_time_between_scans, double);
     YAML_LOAD_OPT(params_, min_icp_goodness, double);
+    YAML_LOAD_OPT(params_, min_icp_goodness_lc, double);
     YAML_LOAD_OPT(params_, decimate_to_point_count, unsigned int);
     YAML_LOAD_OPT(params_, voxel_filter_resolution, double);
     YAML_LOAD_OPT(params_, voxel_filter_max_e2_e0, double);
@@ -69,6 +72,12 @@ void LidarICP::initialize(const std::string& cfg_block)
     YAML_LOAD_OPT_DEG(params_, mrpt_icp_without_vel.thresholdAng, double);
     YAML_LOAD_OPT(params_, mrpt_icp_without_vel.ALFA, double);
     YAML_LOAD_OPT(params_, mrpt_icp_without_vel.smallestThresholdDist, double);
+
+    YAML_LOAD_OPT(params_, mrpt_icp_loopclosure.maxIterations, unsigned int);
+    YAML_LOAD_OPT(params_, mrpt_icp_loopclosure.thresholdDist, double);
+    YAML_LOAD_OPT_DEG(params_, mrpt_icp_loopclosure.thresholdAng, double);
+    YAML_LOAD_OPT(params_, mrpt_icp_loopclosure.ALFA, double);
+    YAML_LOAD_OPT(params_, mrpt_icp_loopclosure.smallestThresholdDist, double);
 
     YAML_LOAD_OPT(params_, debug_save_lidar_odometry, bool);
     YAML_LOAD_OPT(params_, debug_save_extra_edges, bool);
@@ -112,8 +121,8 @@ void LidarICP::onNewObservation(CObservation::Ptr& o)
     const auto queued = worker_pool_.pendingTasks();
     if (queued > 1)
     {
-        MRPT_LOG_THROTTLE_WARN(
-            5.0, "Dropping observation due to worker threads too busy.");
+        MRPT_LOG_THROTTLE_ERROR(
+            1.0, "Dropping observation due to worker threads too busy.");
         return;
     }
     profiler_.enter("delay_onNewObs_to_process");
@@ -255,14 +264,17 @@ void LidarICP::doProcessNewObservation(CObservation::Ptr& o)
         // Create a new KF if the distance since the last one is large enough:
         state_.accum_since_last_kf = state_.accum_since_last_kf + rel_pose;
         const double dist_eucl_since_last = state_.accum_since_last_kf.norm();
+        const double rot_since_last       = 0;
         MRPT_TODO("Add rotation threshold");
 
         MRPT_LOG_DEBUG_FMT(
-            "Since last KF: dist=%5.03f m", dist_eucl_since_last);
+            "Since last KF: dist=%5.03f m rotation=%.01f deg",
+            dist_eucl_since_last, mrpt::RAD2DEG(rot_since_last));
 
         // Should we create a new KF?
         if (icp_out.goodness > params_.min_icp_goodness &&
-            dist_eucl_since_last > params_.min_dist_xyz_between_keyframes)
+            (dist_eucl_since_last > params_.min_dist_xyz_between_keyframes ||
+             rot_since_last > params_.min_rotation_between_keyframes))
         {
             // Yes: create new KF
             // 1) New KeyFrame
@@ -382,8 +394,7 @@ void LidarICP::checkForNearbyKFs()
 
         lpg.dijkstra_nodes_estimate(std::ref(topolog_dists));
 
-        // Remove too distant KFs: they belong to "loop closure", not to
-        // "lidar odometry"!
+        // Sort KFs by distance
         for (const auto& kfs : lpg.nodes)
         {
             const auto it_dist = topolog_dists.find(kfs.first);
@@ -396,6 +407,7 @@ void LidarICP::checkForNearbyKFs()
         std::map<mrpt::graphs::TNodeID, std::set<mrpt::graphs::TNodeID>> adj;
         lpg.getAdjacencyMatrix(adj);
 
+        // Remove too distant KFs:
         while (lpg.nodes.size() > params_.max_KFs_local_graph)
         {
             const auto id_to_remove = KF_distances.rbegin()->second.first;
@@ -416,8 +428,13 @@ void LidarICP::checkForNearbyKFs()
     auto it1 = KF_distances.lower_bound(params_.min_dist_to_matching);
     auto it2 = KF_distances.upper_bound(params_.max_dist_to_matching);
 
+    // Store here all the desired checks:
+    std::vector<ICP_Input::Ptr>                nearby_checks;
+    std::map<euclidean_dist_t, ICP_Input::Ptr> loop_closure_checks;
+
     for (auto it = it1; it != it2; ++it)
     {
+        const double             kf_eucl_dist        = it->first;
         const auto               kf_id               = it->second.first;
         const topological_dist_t kf_topo_d           = it->second.second;
         bool                     edge_already_exists = false;
@@ -472,39 +489,72 @@ void LidarICP::checkForNearbyKFs()
             if (kf_topo_d < MIN_DIST_TO_CONSIDER_LOOP_CLOSURE)
             {
                 // Regular, nearby KF-to-KF ICP check:
-                d->debug_str           = "extra_edge"s;
-                icp_in.mrpt_icp_params = params_.mrpt_icp_with_vel;
+                d->align_kind      = AlignKind::NearbyAlign;
+                d->debug_str       = "extra_edge"s;
+                d->mrpt_icp_params = params_.mrpt_icp_with_vel;
+
+                nearby_checks.emplace_back(std::move(d));
             }
             else
             {
                 // Attempt to close a loop:
-                d->debug_str           = "loop_closure"s;
-                icp_in.mrpt_icp_params = params_.mrpt_icp_without_vel;
+                d->align_kind      = AlignKind::LoopClosure;
+                d->debug_str       = "loop_closure"s;
+                d->mrpt_icp_params = params_.mrpt_icp_loopclosure;
 
-                MRPT_LOG_WARN_STREAM(
-                    "Attempting to close a loop between KFs #"
-                    << kf_id << " <==> #" << current_kf_id);
+                loop_closure_checks[kf_eucl_dist] = std::move(d);
             }
+        }
+    }
 
-            worker_pool_past_KFs_.enqueue(
-                &LidarICP::doCheckForNonAdjacentKFs, this, d);
+    // Actually send the tasks to the worker thread, firstly filtering
+    // some of them to reduce the computational cost:
+    // Nearby checks: send all
+    for (const auto& d : nearby_checks)
+    {
+        worker_pool_past_KFs_.enqueue(
+            &LidarICP::doCheckForNonAdjacentKFs, this, d);
 
-            // Mark as sent for check:
-            state_.local_pose_graph.checked_KF_pairs.insert(pair_ids);
+        {
+            std::lock_guard<std::mutex> lck(local_pose_graph_mtx);
+
+            // Mark as already considered for check:
+            state_.local_pose_graph.checked_KF_pairs.insert(std::make_pair(
+                std::min(d->to_id, d->from_id),
+                std::max(d->to_id, d->from_id)));
+        }
+    }
+    // Loop closures: just send the one with the smallest distance (in theory,
+    // it *might* be the easiest one to align...)
+    if (!loop_closure_checks.empty())
+    {
+        const auto& d = loop_closure_checks.begin()->second;
+
+        worker_pool_past_KFs_.enqueue(
+            &LidarICP::doCheckForNonAdjacentKFs, this, d);
+
+        MRPT_LOG_WARN_STREAM(
+            "Attempting to close a loop between KFs #" << d->to_id << " <==> #"
+                                                       << d->from_id);
+        {
+            std::lock_guard<std::mutex> lck(local_pose_graph_mtx);
+            // Mark as already considered for check:
+            state_.local_pose_graph.checked_KF_pairs.insert(std::make_pair(
+                std::min(d->to_id, d->from_id),
+                std::max(d->to_id, d->from_id)));
         }
     }
 
     MRPT_END
 }
 
-void LidarICP::doCheckForNonAdjacentKFs(std::shared_ptr<ICP_Input> d)
+void LidarICP::doCheckForNonAdjacentKFs(ICP_Input::Ptr d)
 {
     try
     {
         ProfilerEntry tleg(profiler_, "doCheckForNonAdjacentKFs");
 
         // Call ICP:
-        // Use current values for: state_.mrpt_icp.options
         mrpt::slam::CICP::TReturnInfo ret_info;
 
         ICP_Output icp_out;
@@ -532,8 +582,14 @@ void LidarICP::doCheckForNonAdjacentKFs(std::shared_ptr<ICP_Input> d)
             << init_guess.asString() << " (changes " << 100 * correction_percent
             << "%)");
 
-        if (icp_goodness > params_.min_icp_goodness &&
-            correction_percent < 0.20)
+        const double goodness_thres =
+            (d->align_kind == AlignKind::LoopClosure
+                 ? params_.min_icp_goodness_lc
+                 : params_.min_icp_goodness);
+
+        if (icp_goodness > goodness_thres &&
+            (correction_percent < 0.2 ||
+             d->align_kind == AlignKind::LoopClosure))
         {
             std::future<BackEndBase::AddFactor_Output> factor_out_fut;
             mola::FactorRelativePose3                  fPose3(
@@ -635,10 +691,12 @@ void LidarICP::run_one_icp(const ICP_Input& in, ICP_Output& out)
     MRPT_TODO("Move this to its own method");
 
     // Save debug files for debugging ICP quality
-    bool gen_debug =
-        (in.debug_str == "lidar_odom"s && params_.debug_save_lidar_odometry) ||
-        (in.debug_str == "extra_edge"s && params_.debug_save_extra_edges) ||
-        (in.debug_str == "loop_closure"s && params_.debug_save_loop_closures);
+    bool gen_debug = (in.align_kind == AlignKind::LidarOdometry &&
+                      params_.debug_save_lidar_odometry) ||
+                     (in.align_kind == AlignKind::NearbyAlign &&
+                      params_.debug_save_extra_edges) ||
+                     (in.align_kind == AlignKind::LoopClosure &&
+                      params_.debug_save_loop_closures);
 
     if (gen_debug)
     {

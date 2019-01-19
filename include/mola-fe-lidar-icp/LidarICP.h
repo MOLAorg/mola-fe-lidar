@@ -49,9 +49,17 @@ class LidarICP : public FrontEndBase
          * the map [meters]. */
         double min_dist_xyz_between_keyframes{1.0};
 
+        /** Minimum rotation (in 3D space, yaw, pitch,roll, altogether) between
+         * keyframes inserted into
+         * the map [rad here, degrees in the yaml file]. */
+        double min_rotation_between_keyframes{mrpt::DEG2RAD(30.0)};
+
         /** Minimum ICP "goodness" (in the range [0,1]) for a new KeyFrame to be
-         * accepted. */
-        double min_icp_goodness{0.6};
+         * accepted during regular lidar odometry & mapping */
+        double min_icp_goodness{0.4};
+
+        /** Minimum ICP quality for a loop closure to be accepted */
+        double min_icp_goodness_lc{0.6};
 
         /** If !=0, decimate point clouds so they do not have more than this
          * number of points */
@@ -69,8 +77,8 @@ class LidarICP : public FrontEndBase
 
         /** ICP parameters for the case of having, or not, a good velocity model
          * that works a good prior */
-        mrpt::slam::CICP::TConfigParams mrpt_icp_with_vel{},
-            mrpt_icp_without_vel{};
+        mrpt::slam::CICP::TConfigParams mrpt_icp_with_vel, mrpt_icp_without_vel,
+            mrpt_icp_loopclosure;
 
         bool debug_save_lidar_odometry{false};
         bool debug_save_extra_edges{false};
@@ -132,8 +140,18 @@ class LidarICP : public FrontEndBase
     void doProcessNewObservation(CObservation::Ptr& o);
     void checkForNearbyKFs();
 
+    enum class AlignKind : uint8_t
+    {
+        LidarOdometry,
+        NearbyAlign,
+        LoopClosure
+    };
+
     struct ICP_Input
     {
+        using Ptr = std::shared_ptr<ICP_Input>;
+
+        AlignKind           align_kind{AlignKind::LidarOdometry};
         id_t                to_id{mola::INVALID_ID};
         id_t                from_id{mola::INVALID_ID};
         pointclouds_t       to_pc, from_pc;
@@ -155,7 +173,7 @@ class LidarICP : public FrontEndBase
      * to check for additional edges apart of the "odometry edge", to increase
      * the quality of the estimation by increasing the pose-graph density.
      */
-    void doCheckForNonAdjacentKFs(std::shared_ptr<ICP_Input> d);
+    void doCheckForNonAdjacentKFs(ICP_Input::Ptr d);
 
     void filterPointCloud(
         const mrpt::maps::CPointsMap& pc, mrpt::maps::CPointsMap& pc_out);
