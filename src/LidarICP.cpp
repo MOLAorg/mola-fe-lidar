@@ -70,7 +70,9 @@ void LidarICP::initialize(const std::string& cfg_block)
     YAML_LOAD_OPT(params_, mrpt_icp_without_vel.ALFA, double);
     YAML_LOAD_OPT(params_, mrpt_icp_without_vel.smallestThresholdDist, double);
 
-    YAML_LOAD_OPT(params_, debug_save_all_icp_results, bool);
+    YAML_LOAD_OPT(params_, debug_save_lidar_odometry, bool);
+    YAML_LOAD_OPT(params_, debug_save_extra_edges, bool);
+    YAML_LOAD_OPT(params_, debug_save_loop_closures, bool);
 
     {
         ProfilerEntry tle(profiler_, "filterPointCloud_initialize");
@@ -218,7 +220,7 @@ void LidarICP::doProcessNewObservation(CObservation::Ptr& o)
         icp_in.from_pc = last_points;
         icp_in.from_id = state_.last_kf;
         icp_in.to_id   = mola::INVALID_ID;  // current data, not a new KF (yet)
-        icp_in.debug_str = "lidar_odometry";
+        icp_in.debug_str = "lidar_odom";
 
         // If we don't have a valid twist estimation, use a larger ICP
         // correspondence threshold:
@@ -354,11 +356,16 @@ void LidarICP::doProcessNewObservation(CObservation::Ptr& o)
 
 void LidarICP::checkForNearbyKFs()
 {
+    using namespace std::string_literals;
+
     MRPT_START
 
     // Run Dijkstra wrt to the last KF:
-    std::map<double, mrpt::graphs::TNodeID> KF_distances;
-    mola::id_t                              last_kf_id{mola::INVALID_ID};
+    using euclidean_dist_t = double;
+    std::map<
+        euclidean_dist_t, std::pair<mrpt::graphs::TNodeID, topological_dist_t>>
+               KF_distances;
+    mola::id_t last_kf_id{mola::INVALID_ID};
     {
         std::lock_guard<std::mutex> lck(local_pose_graph_mtx);
 
@@ -374,14 +381,19 @@ void LidarICP::checkForNearbyKFs()
         // Remove too distant KFs: they belong to "loop closure", not to
         // "lidar odometry"!
         for (const auto& kfs : lpg.nodes)
-            KF_distances[kfs.second.norm()] = kfs.first;
+        {
+            MRPT_TODO("get from dijkstra");
+            topological_dist_t topo_d = 1;
+
+            KF_distances[kfs.second.norm()] = std::make_pair(kfs.first, topo_d);
+        }
 
         std::map<mrpt::graphs::TNodeID, std::set<mrpt::graphs::TNodeID>> adj;
         lpg.getAdjacencyMatrix(adj);
 
         while (lpg.nodes.size() > params_.max_KFs_local_graph)
         {
-            const auto id_to_remove = KF_distances.rbegin()->second;
+            const auto id_to_remove = KF_distances.rbegin()->second.first;
             KF_distances.erase(std::prev(KF_distances.end()));
 
             lpg.nodes.erase(id_to_remove);
@@ -401,8 +413,9 @@ void LidarICP::checkForNearbyKFs()
 
     for (auto it = it1; it != it2; ++it)
     {
-        const auto kf_id               = it->second;
-        bool       edge_already_exists = false;
+        const auto               kf_id               = it->second.first;
+        const topological_dist_t kf_topo_d           = it->second.second;
+        bool                     edge_already_exists = false;
 
         // Already sent out for checking?
         const auto pair_ids = std::make_pair(
@@ -449,6 +462,12 @@ void LidarICP::checkForNearbyKFs()
             d->init_guess_to_wrt_from =
                 state_.local_pose_graph.graph.nodes[kf_id].asTPose();
 
+            // Is this an extra edge for a nearby KF, or a potential loop
+            // closure?
+            d->debug_str = kf_topo_d < MIN_DIST_TO_CONSIDER_LOOP_CLOSURE
+                               ? "extra_edge"s
+                               : "loop_closure"s;
+
             worker_pool_past_KFs_.enqueue(
                 &LidarICP::doCheckForNonAdjacentKFs, this, d);
 
@@ -471,7 +490,6 @@ void LidarICP::doCheckForNonAdjacentKFs(std::shared_ptr<ICP_Input> d)
         mrpt::slam::CICP::TReturnInfo ret_info;
 
         ICP_Output icp_out;
-        d->debug_str = "doCheckForNonAdjacentKFs";
         {
             run_one_icp(*d, icp_out);
         }
@@ -598,7 +616,12 @@ void LidarICP::run_one_icp(const ICP_Input& in, ICP_Output& out)
 
     // -------------------------------------------------
     // Save debug files for debugging ICP quality
-    if (params_.debug_save_all_icp_results)
+    bool gen_debug =
+        (in.debug_str == "lidar_odom"s && params_.debug_save_lidar_odometry) ||
+        (in.debug_str == "extra_edge"s && params_.debug_save_extra_edges) ||
+        (in.debug_str == "loop_closure"s && params_.debug_save_loop_closures);
+
+    if (gen_debug)
     {
         auto fil_name_prefix = mrpt::system::fileNameStripInvalidChars(
             getModuleInstanceName() + mrpt::format(

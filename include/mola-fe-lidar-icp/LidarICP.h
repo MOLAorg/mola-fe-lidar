@@ -72,11 +72,17 @@ class LidarICP : public FrontEndBase
         mrpt::slam::CICP::TConfigParams mrpt_icp_with_vel{},
             mrpt_icp_without_vel{};
 
-        bool debug_save_all_icp_results{false};
+        bool debug_save_lidar_odometry{false};
+        bool debug_save_extra_edges{false};
+        bool debug_save_loop_closures{false};
     };
 
     /** Algorithm parameters */
     Parameters params_;
+
+    using topological_dist_t = std::size_t;
+
+    constexpr static topological_dist_t MIN_DIST_TO_CONSIDER_LOOP_CLOSURE = 10;
 
    private:
     /** The worker thread pool with 1 thread for processing incomming scans */
