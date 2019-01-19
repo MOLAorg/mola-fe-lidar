@@ -365,25 +365,30 @@ void LidarICP::checkForNearbyKFs()
     std::map<
         euclidean_dist_t, std::pair<mrpt::graphs::TNodeID, topological_dist_t>>
                KF_distances;
-    mola::id_t last_kf_id{mola::INVALID_ID};
+    mola::id_t current_kf_id{mola::INVALID_ID};
     {
         std::lock_guard<std::mutex> lck(local_pose_graph_mtx);
 
-        auto& lpg  = state_.local_pose_graph.graph;
-        last_kf_id = state_.last_kf;
+        auto& lpg     = state_.local_pose_graph.graph;
+        current_kf_id = state_.last_kf;
 
-        lpg.root = last_kf_id;
+        // Call Dijkstra, starting from the current_kf_id as root, and build a
+        // spanning-tree to estimate the relative poses, and topological
+        // distances, to all other nodes:
+        lpg.root = current_kf_id;
         lpg.nodes.clear();
         lpg.nodes[lpg.root] = mrpt::poses::CPose3D::Identity();
-        lpg.dijkstra_nodes_estimate();
-        MRPT_TODO("Dijkstra: return topo dist");
+        std::map<mrpt::graphs::TNodeID, size_t> topolog_dists;
+
+        lpg.dijkstra_nodes_estimate(std::ref(topolog_dists));
 
         // Remove too distant KFs: they belong to "loop closure", not to
         // "lidar odometry"!
         for (const auto& kfs : lpg.nodes)
         {
-            MRPT_TODO("get from dijkstra");
-            topological_dist_t topo_d = 1;
+            const auto it_dist = topolog_dists.find(kfs.first);
+            ASSERT_(it_dist != topolog_dists.end());
+            const topological_dist_t topo_d = it_dist->second;
 
             KF_distances[kfs.second.norm()] = std::make_pair(kfs.first, topo_d);
         }
@@ -419,7 +424,7 @@ void LidarICP::checkForNearbyKFs()
 
         // Already sent out for checking?
         const auto pair_ids = std::make_pair(
-            std::min(kf_id, last_kf_id), std::max(kf_id, last_kf_id));
+            std::min(kf_id, current_kf_id), std::max(kf_id, current_kf_id));
 
         {
             std::lock_guard<std::mutex> lck(local_pose_graph_mtx);
@@ -437,12 +442,12 @@ void LidarICP::checkForNearbyKFs()
             worldmodel_->factors_lock();
 
             const auto connected = worldmodel_->entity_neighbors(kf_id);
-            if (connected.count(last_kf_id) != 0)
+            if (connected.count(current_kf_id) != 0)
             {
                 MRPT_LOG_DEBUG_STREAM(
                     "[checkForNearbyKFs] Discarding pair check since a factor "
                     "already exists between #"
-                    << kf_id << " <==> #" << last_kf_id);
+                    << kf_id << " <==> #" << current_kf_id);
                 edge_already_exists = false;
             }
 
@@ -456,7 +461,7 @@ void LidarICP::checkForNearbyKFs()
 
             auto d     = std::make_shared<ICP_Input>();
             d->to_id   = kf_id;
-            d->from_id = last_kf_id;
+            d->from_id = current_kf_id;
             d->to_pc   = state_.local_pose_graph.pcs[d->to_id];
             d->from_pc = state_.local_pose_graph.pcs[d->from_id];
             d->init_guess_to_wrt_from =
@@ -464,9 +469,19 @@ void LidarICP::checkForNearbyKFs()
 
             // Is this an extra edge for a nearby KF, or a potential loop
             // closure?
-            d->debug_str = kf_topo_d < MIN_DIST_TO_CONSIDER_LOOP_CLOSURE
-                               ? "extra_edge"s
-                               : "loop_closure"s;
+            if (kf_topo_d < MIN_DIST_TO_CONSIDER_LOOP_CLOSURE)
+            {
+                // Regular, nearby KF-to-KF ICP check:
+                d->debug_str = "extra_edge"s;
+            }
+            else
+            {
+                // Attempt to close a loop:
+                d->debug_str = "loop_closure"s;
+                MRPT_LOG_WARN_STREAM(
+                    "Attempting to close a loop between KFs #"
+                    << kf_id << " <==> #" << current_kf_id);
+            }
 
             worker_pool_past_KFs_.enqueue(
                 &LidarICP::doCheckForNonAdjacentKFs, this, d);
