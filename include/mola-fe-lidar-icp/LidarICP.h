@@ -61,6 +61,10 @@ class LidarICP : public FrontEndBase
         double voxel_filter_resolution{.5};
         double voxel_filter_max_e2_e0{30.}, voxel_filter_max_e1_e0{30.};
 
+        /** Distance range to check for additional SE(3) edges */
+        double min_dist_to_matching{6.0};
+        double max_dist_to_matching{12.0};
+
         unsigned int max_KFs_local_graph{1000};
 
         /** ICP parameters for the case of having, or not, a good velocity model

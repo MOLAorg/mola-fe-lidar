@@ -55,6 +55,9 @@ void LidarICP::initialize(const std::string& cfg_block)
     YAML_LOAD_OPT(params_, voxel_filter_max_e2_e0, double);
     YAML_LOAD_OPT(params_, voxel_filter_max_e1_e0, double);
 
+    YAML_LOAD_OPT(params_, min_dist_to_matching, double);
+    YAML_LOAD_OPT(params_, max_dist_to_matching, double);
+
     YAML_LOAD_OPT(params_, mrpt_icp_with_vel.maxIterations, unsigned int);
     YAML_LOAD_OPT(params_, mrpt_icp_with_vel.thresholdDist, double);
     YAML_LOAD_OPT_DEG(params_, mrpt_icp_with_vel.thresholdAng, double);
@@ -366,6 +369,7 @@ void LidarICP::checkForNearbyKFs()
         lpg.nodes.clear();
         lpg.nodes[lpg.root] = mrpt::poses::CPose3D::Identity();
         lpg.dijkstra_nodes_estimate();
+        MRPT_TODO("Dijkstra: return topo dist");
 
         // Remove too distant KFs: they belong to "loop closure", not to
         // "lidar odometry"!
@@ -392,11 +396,8 @@ void LidarICP::checkForNearbyKFs()
 
     // Pick the node at an intermediary distance and try to align
     // against it:
-    const double min_dist_to_test = 2 * params_.min_dist_xyz_between_keyframes;
-    const double max_dist_to_test = 4 * params_.min_dist_xyz_between_keyframes;
-
-    auto it1 = KF_distances.lower_bound(min_dist_to_test);
-    auto it2 = KF_distances.upper_bound(max_dist_to_test);
+    auto it1 = KF_distances.lower_bound(params_.min_dist_to_matching);
+    auto it2 = KF_distances.upper_bound(params_.max_dist_to_matching);
 
     for (auto it = it1; it != it2; ++it)
     {
@@ -532,6 +533,10 @@ void LidarICP::run_one_icp(const ICP_Input& in, ICP_Output& out)
 
     MRPT_START
 
+    // Manually measure time in this method: we cannot directly use
+    // ProfilerEntry since it's not multi-thread, re-entry, safe.
+    const double t_start = mrpt::system::now_double();
+
     ASSERT_(in.from_pc.original && in.from_pc.sampled);
     ASSERT_(in.to_pc.original && in.to_pc.sampled);
 
@@ -587,6 +592,9 @@ void LidarICP::run_one_icp(const ICP_Input& in, ICP_Output& out)
         << in.to_pc.sampled->size()
         << " `from` point count=" << in.from_pc.sampled->size()
         << " decimation=" << mrpt_icp.options.corresponding_points_decimation);
+
+    const double t_end = mrpt::system::now_double();
+    profiler_.registerUserMeasure("run_one_icp", t_end - t_start);
 
     // -------------------------------------------------
     // Save debug files for debugging ICP quality
@@ -673,6 +681,7 @@ void LidarICP::run_one_icp(const ICP_Input& in, ICP_Output& out)
                 "Error saving final ICP scene to :" << fil_name_final);
 
         // Also: save as Rawlog for ICP debugging in RawLogViewer app:
+        if (0)
         {
             mrpt::obs::CRawlog rawlog;
             {
