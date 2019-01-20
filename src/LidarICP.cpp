@@ -30,6 +30,7 @@
 #include <mrpt/poses/CPose3DPDFGaussian.h>
 #include <mrpt/system/datetime.h>
 #include <mrpt/system/filesystem.h>
+#include <mrpt/system/string_utils.h>
 #include <yaml-cpp/yaml.h>
 
 using namespace mola;
@@ -37,6 +38,48 @@ using namespace mola;
 MRPT_INITIALIZER(do_register){MOLA_REGISTER_MODULE(LidarICP)}
 
 LidarICP::LidarICP() = default;
+
+static void load_icp_set_of_params(
+    std::vector<MultiCloudICP::Parameters>& out, YAML::Node& cfg,
+    const std::string& prefix)
+{
+    using namespace std::string_literals;
+
+    std::string sName = prefix + "maxIterations"s;
+    ASSERTMSG_(cfg[sName], "Missing YAML required entry: `"s + sName + "`"s);
+    std::string maxIterations = cfg[sName].as<std::string>("");
+
+    sName = prefix + "thresholdDist"s;
+    ASSERTMSG_(cfg[sName], "Missing YAML required entry: `"s + sName + "`"s);
+    std::string thresholdDists = cfg[sName].as<std::string>("");
+
+    sName = prefix + "thresholdAng"s;
+    ASSERTMSG_(cfg[sName], "Missing YAML required entry: `"s + sName + "`"s);
+    std::string thresholdAngs = cfg[sName].as<std::string>("");
+
+    // Vector -> values:
+    std::vector<std::string> maxIterations_vals;
+    mrpt::system::tokenize(maxIterations, " ,", maxIterations_vals);
+
+    std::vector<std::string> thresholdDists_vals;
+    mrpt::system::tokenize(thresholdDists, " ,", thresholdDists_vals);
+
+    std::vector<std::string> thresholdAngs_vals;
+    mrpt::system::tokenize(thresholdAngs, " ,", thresholdAngs_vals);
+
+    ASSERT_(maxIterations_vals.size() >= 1);
+    ASSERT_(maxIterations_vals.size() == thresholdDists_vals.size());
+    ASSERT_(maxIterations_vals.size() == thresholdAngs_vals.size());
+
+    const size_t n = thresholdAngs_vals.size();
+    out.resize(n);
+    for (size_t i = 0; i < n; i++)
+    {
+        out[i].maxIterations = std::stoul(maxIterations_vals[i]);
+        out[i].thresholdDist = std::stod(thresholdDists_vals[i]);
+        out[i].thresholdAng  = mrpt::DEG2RAD(std::stod(thresholdAngs_vals[i]));
+    }
+}
 
 void LidarICP::initialize(const std::string& cfg_block)
 {
@@ -61,23 +104,12 @@ void LidarICP::initialize(const std::string& cfg_block)
     YAML_LOAD_OPT(params_, min_dist_to_matching, double);
     YAML_LOAD_OPT(params_, max_dist_to_matching, double);
 
-    YAML_LOAD_OPT(params_, mrpt_icp_with_vel.maxIterations, unsigned int);
-    YAML_LOAD_OPT(params_, mrpt_icp_with_vel.thresholdDist, double);
-    YAML_LOAD_OPT_DEG(params_, mrpt_icp_with_vel.thresholdAng, double);
-    YAML_LOAD_OPT(params_, mrpt_icp_with_vel.ALFA, double);
-    YAML_LOAD_OPT(params_, mrpt_icp_with_vel.smallestThresholdDist, double);
-
-    YAML_LOAD_OPT(params_, mrpt_icp_without_vel.maxIterations, unsigned int);
-    YAML_LOAD_OPT(params_, mrpt_icp_without_vel.thresholdDist, double);
-    YAML_LOAD_OPT_DEG(params_, mrpt_icp_without_vel.thresholdAng, double);
-    YAML_LOAD_OPT(params_, mrpt_icp_without_vel.ALFA, double);
-    YAML_LOAD_OPT(params_, mrpt_icp_without_vel.smallestThresholdDist, double);
-
-    YAML_LOAD_OPT(params_, mrpt_icp_loopclosure.maxIterations, unsigned int);
-    YAML_LOAD_OPT(params_, mrpt_icp_loopclosure.thresholdDist, double);
-    YAML_LOAD_OPT_DEG(params_, mrpt_icp_loopclosure.thresholdAng, double);
-    YAML_LOAD_OPT(params_, mrpt_icp_loopclosure.ALFA, double);
-    YAML_LOAD_OPT(params_, mrpt_icp_loopclosure.smallestThresholdDist, double);
+    load_icp_set_of_params(
+        params_.icp_params_with_vel, cfg, "icp_params_with_vel.");
+    load_icp_set_of_params(
+        params_.icp_params_without_vel, cfg, "icp_params_without_vel.");
+    load_icp_set_of_params(
+        params_.icp_params_loopclosure, cfg, "icp_params_loopclosure.");
 
     YAML_LOAD_OPT(params_, debug_save_lidar_odometry, bool);
     YAML_LOAD_OPT(params_, debug_save_extra_edges, bool);
@@ -233,9 +265,9 @@ void LidarICP::doProcessNewObservation(CObservation::Ptr& o)
 
         // If we don't have a valid twist estimation, use a larger ICP
         // correspondence threshold:
-        icp_in.mrpt_icp_params = state_.last_iter_twist_is_good
-                                     ? params_.mrpt_icp_with_vel
-                                     : params_.mrpt_icp_without_vel;
+        icp_in.icp_params = state_.last_iter_twist_is_good
+                                ? params_.icp_params_with_vel
+                                : params_.icp_params_without_vel;
 
         // Run ICP:
         {
@@ -245,7 +277,7 @@ void LidarICP::doProcessNewObservation(CObservation::Ptr& o)
             run_one_icp(icp_in, icp_out);
         }
         const mrpt::poses::CPose3D rel_pose =
-            icp_out.found_pose_to_wrt_from->getMeanVal();
+            icp_out.found_pose_to_wrt_from.getMeanVal();
 
         // Update velocity model:
         state_.last_iter_twist.vx = rel_pose.x() / dt;
@@ -489,18 +521,18 @@ void LidarICP::checkForNearbyKFs()
             if (kf_topo_d < MIN_DIST_TO_CONSIDER_LOOP_CLOSURE)
             {
                 // Regular, nearby KF-to-KF ICP check:
-                d->align_kind      = AlignKind::NearbyAlign;
-                d->debug_str       = "extra_edge"s;
-                d->mrpt_icp_params = params_.mrpt_icp_with_vel;
+                d->align_kind = AlignKind::NearbyAlign;
+                d->debug_str  = "extra_edge"s;
+                d->icp_params = params_.icp_params_with_vel;
 
                 nearby_checks.emplace_back(std::move(d));
             }
             else
             {
                 // Attempt to close a loop:
-                d->align_kind      = AlignKind::LoopClosure;
-                d->debug_str       = "loop_closure"s;
-                d->mrpt_icp_params = params_.mrpt_icp_loopclosure;
+                d->align_kind = AlignKind::LoopClosure;
+                d->debug_str  = "loop_closure"s;
+                d->icp_params = params_.icp_params_loopclosure;
 
                 loop_closure_checks[kf_eucl_dist] = std::move(d);
             }
@@ -555,14 +587,13 @@ void LidarICP::doCheckForNonAdjacentKFs(ICP_Input::Ptr d)
         ProfilerEntry tleg(profiler_, "doCheckForNonAdjacentKFs");
 
         // Call ICP:
-        mrpt::slam::CICP::TReturnInfo ret_info;
-
         ICP_Output icp_out;
         {
+            ProfilerEntry tle(profiler_, "doCheckForNonAdjacentKFs.run_icp");
             run_one_icp(*d, icp_out);
         }
         const mrpt::poses::CPose3D rel_pose =
-            icp_out.found_pose_to_wrt_from->getMeanVal();
+            icp_out.found_pose_to_wrt_from.getMeanVal();
         const double icp_goodness = icp_out.goodness;
 
         // Accept the new edge?
@@ -575,9 +606,7 @@ void LidarICP::doCheckForNonAdjacentKFs(ICP_Input::Ptr d)
             "[doCheckForNonAdjacentKFs] Checking KFs: #"
             << d->from_id << " ==> #" << d->to_id
             << " init_guess: " << d->init_guess_to_wrt_from.asString() << "\n"
-            << mrpt::format(
-                   "MRPT ICP: goodness=%.03f iters=%u\n", ret_info.goodness,
-                   ret_info.nIterations)
+            << mrpt::format("ICP goodness=%.03f\n", icp_out.goodness)
             << "ICP rel_pose=" << rel_pose.asString() << " init_guess was "
             << init_guess.asString() << " (changes " << 100 * correction_percent
             << "%)");
@@ -625,67 +654,57 @@ void LidarICP::run_one_icp(const ICP_Input& in, ICP_Output& out)
 
     MRPT_START
 
-    // Manually measure time in this method: we cannot directly use
-    // ProfilerEntry since it's not multi-thread, re-entry, safe.
-    const double t_start = mrpt::system::now_double();
-
-    ASSERT_(in.from_pc.original && in.from_pc.sampled);
-    ASSERT_(in.to_pc.original && in.to_pc.sampled);
-
-    // Run two passes: one coarse with the sampled pointcloud, then
-    // another one with the full-resolution cloud:
-    auto current_init_guess = mrpt::poses::CPose3D(in.init_guess_to_wrt_from);
-    mrpt::slam::CICP::TReturnInfo ret_info;
-    mrpt::slam::CICP              mrpt_icp;
-
-    for (int pass = 0; pass <= 1; pass++)
     {
-        // Call ICP:
-        mrpt_icp.options = in.mrpt_icp_params;
-        auto& from_pc    = pass == 0 ? in.from_pc.sampled : in.from_pc.original;
-        auto& to_pc      = pass == 0 ? in.to_pc.sampled : in.to_pc.original;
+        ProfilerEntry tle(profiler_, "run_one_icp");
 
+        ASSERT_(in.from_pc.original && in.from_pc.sampled);
+        ASSERT_(in.to_pc.original && in.to_pc.sampled);
+
+        MultiCloudICP::clouds_t pcs_from, pcs_to;
+        pcs_from.push_back(in.from_pc.sampled);
+        // pcs_from.push_back(in.from_pc.original);
+
+        pcs_to.push_back(in.to_pc.sampled);
+        // pcs_to.push_back(in.to_pc.original);
+
+        unsigned int decim = 1;
         if (params_.decimate_to_point_count > 0)
+            decim = static_cast<unsigned>(
+                in.from_pc.original->size() / params_.decimate_to_point_count);
+
+        MRPT_LOG_DEBUG_STREAM(
+            "MRPT ICP: `to` point count="
+            << in.to_pc.sampled->size() << " `from` point count="
+            << in.from_pc.sampled->size() << " decimation=" << decim);
+
+        ASSERT_(!in.icp_params.empty());
+
+        mrpt::math::TPose3D current_solution = in.init_guess_to_wrt_from;
+
+        for (unsigned int stage = 0; stage < in.icp_params.size(); stage++)
         {
-            unsigned decim = static_cast<unsigned>(
-                to_pc->size() / params_.decimate_to_point_count);
-            mrpt_icp.options.corresponding_points_decimation = decim;
+            MultiCloudICP::Parameters icp_params       = in.icp_params[stage];
+            icp_params.corresponding_points_decimation = decim;
+
+            MultiCloudICP::Results icp_result;
+            MultiCloudICP::align(
+                pcs_from, pcs_to, current_solution, icp_params, icp_result);
+
+            // Keep as init value for next stage:
+            current_solution = icp_result.optimal_tf.mean.asTPose();
+
+            out.found_pose_to_wrt_from = icp_result.optimal_tf;
+            out.goodness               = icp_result.goodness;
+
+            MRPT_LOG_DEBUG_FMT(
+                "ICP stage #%u: goodness=%.03f iters=%u rel_pose=%s", stage,
+                out.goodness, static_cast<unsigned int>(icp_result.nIterations),
+                out.found_pose_to_wrt_from.getMeanVal().asString().c_str());
         }
-        else
-        {
-            mrpt_icp.options.corresponding_points_decimation = 1;
-        }
 
-        mrpt::poses::CPose3DPDFGaussian initial_guess;
-        initial_guess.mean = current_init_guess;
-
-        out.found_pose_to_wrt_from = mrpt_icp.Align3DPDF(
-            from_pc.get(), to_pc.get(), initial_guess, nullptr /*running_time*/,
-            &ret_info);
-
-        current_init_guess = out.found_pose_to_wrt_from->getMeanVal();
-
-        MRPT_LOG_DEBUG_FMT(
-            "MRPT ICP pass #%i: goodness=%.03f iters=%u rel_pose=%s", pass,
-            out.goodness, ret_info.nIterations,
-            out.found_pose_to_wrt_from->getMeanVal().asString().c_str());
-
-    }  // end for each pass
-
-    // Check quality of match:
-    MRPT_TODO("Impl. finite differences based Hessian check");
-    // m1->determineMatching3D(m2,gaussPdf->mean,correspondences, matchParams,
-    // matchExtraResults);
-
-    out.goodness = static_cast<double>(ret_info.goodness);
-    MRPT_LOG_DEBUG_STREAM(
-        "MRPT ICP: `to` point count="
-        << in.to_pc.sampled->size()
-        << " `from` point count=" << in.from_pc.sampled->size()
-        << " decimation=" << mrpt_icp.options.corresponding_points_decimation);
-
-    const double t_end = mrpt::system::now_double();
-    profiler_.registerUserMeasure("run_one_icp", t_end - t_start);
+        // Check quality of match:
+        MRPT_TODO("Impl. finite differences based Hessian check");
+    }
 
     // -------------------------------------------------
     MRPT_TODO("Move this to its own method");
@@ -756,7 +775,7 @@ void LidarICP::run_one_icp(const ICP_Input& in, ICP_Output& out)
                 "Error saving init ICP scene to :" << fil_name_init);
 
         // Final:
-        const auto final_pose = out.found_pose_to_wrt_from->getMeanVal();
+        const auto final_pose = out.found_pose_to_wrt_from.getMeanVal();
         gl_to->setPose(final_pose);
 
         {
@@ -807,14 +826,16 @@ void LidarICP::run_one_icp(const ICP_Input& in, ICP_Output& out)
                 pc->sensorLabel = "to_original";
                 rawlog.addObservationMemoryReference(pc);
             }
+#if 0
             {
                 mrpt::config::CConfigFileMemory cfg;
-                in.mrpt_icp_params.saveToConfigFile(cfg, "ICP");
+                in.icp_params.saveToConfigFile(cfg, "ICP");
 
                 auto comm  = mrpt::obs::CObservationComment::Create();
                 comm->text = cfg.getContent();
                 rawlog.addObservationMemoryReference(comm);
             }
+#endif
 
             const auto fil_name_rawlog = fil_name_prefix + ".rawlog"s;
             if (rawlog.saveToRawLogFile(fil_name_rawlog))

@@ -18,6 +18,7 @@
 #include <mrpt/slam/CICP.h>
 #include <mutex>
 #include "CPointCloudVoxelGrid.h"
+#include "MultiCloudICP.h"
 
 namespace mola
 {
@@ -76,9 +77,10 @@ class LidarICP : public FrontEndBase
         unsigned int max_KFs_local_graph{1000};
 
         /** ICP parameters for the case of having, or not, a good velocity model
-         * that works a good prior */
-        mrpt::slam::CICP::TConfigParams mrpt_icp_with_vel, mrpt_icp_without_vel,
-            mrpt_icp_loopclosure;
+         * that works a good prior. Each entry in the vector is an "ICP stage",
+         * to be run as a sequence of coarser to finer detail */
+        std::vector<MultiCloudICP::Parameters> icp_params_with_vel,
+            icp_params_without_vel, icp_params_loopclosure;
 
         bool debug_save_lidar_odometry{false};
         bool debug_save_extra_edges{false};
@@ -157,15 +159,15 @@ class LidarICP : public FrontEndBase
         pointclouds_t       to_pc, from_pc;
         mrpt::math::TPose3D init_guess_to_wrt_from;
 
-        mrpt::slam::CICP::TConfigParams mrpt_icp_params;
+        std::vector<MultiCloudICP::Parameters> icp_params;
 
         /** used to identity where does this request come from */
         std::string debug_str;
     };
     struct ICP_Output
     {
-        double                       goodness{.0};
-        mrpt::poses::CPose3DPDF::Ptr found_pose_to_wrt_from;
+        double                          goodness{.0};
+        mrpt::poses::CPose3DPDFGaussian found_pose_to_wrt_from;
     };
     void run_one_icp(const ICP_Input& in, ICP_Output& out);
 
