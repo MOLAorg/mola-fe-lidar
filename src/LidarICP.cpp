@@ -225,13 +225,6 @@ void LidarICP::doProcessNewObservation(CObservation::Ptr& o)
         state_.last_obs_tim = this_obs_tim;
         state_.last_points  = this_obs_points;
 
-        // First time we cannot do ICP since we need at least two pointclouds:
-        if (!last_points.original)
-        {
-            MRPT_LOG_DEBUG("First pointcloud: skipping ICP.");
-            return;
-        }
-
         if (!have_points)
         {
             MRPT_LOG_WARN_STREAM(
@@ -241,72 +234,95 @@ void LidarICP::doProcessNewObservation(CObservation::Ptr& o)
             return;
         }
 
-        // Register point clouds using ICP:
-        // ------------------------------------
-        mrpt::poses::CPose3DPDFGaussian initial_guess;
-        // Use velocity model for the initial guess:
-        double dt = .0;
-        if (last_obs_tim != mrpt::Clock::time_point())
-            dt = mrpt::system::timeDifference(last_obs_tim, this_obs_tim);
+        bool create_keyframe = false;
 
-        ICP_Output icp_out;
-        ICP_Input  icp_in;
-        icp_in.init_guess_to_wrt_from = mrpt::math::TPose3D(
-            state_.last_iter_twist.vx * dt, state_.last_iter_twist.vy * dt,
-            state_.last_iter_twist.vz * dt, state_.last_iter_twist.wz * dt, 0,
-            0);
-        MRPT_TODO("do omega_xyz part!");
-
-        icp_in.to_pc   = this_obs_points;
-        icp_in.from_pc = last_points;
-        icp_in.from_id = state_.last_kf;
-        icp_in.to_id   = mola::INVALID_ID;  // current data, not a new KF (yet)
-        icp_in.debug_str = "lidar_odom";
-
-        // If we don't have a valid twist estimation, use a larger ICP
-        // correspondence threshold:
-        icp_in.icp_params = state_.last_iter_twist_is_good
-                                ? params_.icp_params_with_vel
-                                : params_.icp_params_without_vel;
-
-        // Run ICP:
+        // First time we cannot do ICP since we need at least two pointclouds:
+        if (!last_points.original)
         {
-            ProfilerEntry tle(
-                profiler_, "doProcessNewObservation.3.icp_latest");
+            // Skip ICP.
+            MRPT_LOG_DEBUG("First pointcloud: skipping ICP.");
 
-            run_one_icp(icp_in, icp_out);
+            // Still, create a first KF (at origin)
+            create_keyframe = true;
         }
-        const mrpt::poses::CPose3D rel_pose =
-            icp_out.found_pose_to_wrt_from.getMeanVal();
+        else
+        {
+            // Register point clouds using ICP:
+            // ------------------------------------
+            mrpt::poses::CPose3DPDFGaussian initial_guess;
+            // Use velocity model for the initial guess:
+            double dt = .0;
+            if (last_obs_tim != mrpt::Clock::time_point())
+                dt = mrpt::system::timeDifference(last_obs_tim, this_obs_tim);
 
-        // Update velocity model:
-        state_.last_iter_twist.vx = rel_pose.x() / dt;
-        state_.last_iter_twist.vy = rel_pose.y() / dt;
-        state_.last_iter_twist.vz = rel_pose.z() / dt;
-        state_.last_iter_twist.wz = rel_pose.yaw() / dt;
-        MRPT_TODO("do omega_xyz part!");
+            ICP_Output icp_out;
+            ICP_Input  icp_in;
+            icp_in.init_guess_to_wrt_from = mrpt::math::TPose3D(
+                state_.last_iter_twist.vx * dt, state_.last_iter_twist.vy * dt,
+                state_.last_iter_twist.vz * dt, state_.last_iter_twist.wz * dt,
+                0, 0);
+            MRPT_TODO("do omega_xyz part!");
 
-        state_.last_iter_twist_is_good = true;
+            icp_in.to_pc   = this_obs_points;
+            icp_in.from_pc = last_points;
+            icp_in.from_id = state_.last_kf;
+            icp_in.to_id =
+                mola::INVALID_ID;  // current data, not a new KF (yet)
+            icp_in.debug_str = "lidar_odom";
 
-        MRPT_LOG_DEBUG_STREAM(
-            "Est.twist=" << state_.last_iter_twist.asString());
-        MRPT_LOG_DEBUG_STREAM(
-            "Time since last scan=" << mrpt::system::formatTimeInterval(dt));
+            // If we don't have a valid twist estimation, use a larger ICP
+            // correspondence threshold:
+            icp_in.icp_params = state_.last_iter_twist_is_good
+                                    ? params_.icp_params_with_vel
+                                    : params_.icp_params_without_vel;
 
-        // Create a new KF if the distance since the last one is large enough:
-        state_.accum_since_last_kf = state_.accum_since_last_kf + rel_pose;
-        const double dist_eucl_since_last = state_.accum_since_last_kf.norm();
-        const double rot_since_last       = 0;
-        MRPT_TODO("Add rotation threshold");
+            // Run ICP:
+            {
+                ProfilerEntry tle(
+                    profiler_, "doProcessNewObservation.3.icp_latest");
 
-        MRPT_LOG_DEBUG_FMT(
-            "Since last KF: dist=%5.03f m rotation=%.01f deg",
-            dist_eucl_since_last, mrpt::RAD2DEG(rot_since_last));
+                run_one_icp(icp_in, icp_out);
+            }
+            const mrpt::poses::CPose3D rel_pose =
+                icp_out.found_pose_to_wrt_from.getMeanVal();
+
+            // Update velocity model:
+            state_.last_iter_twist.vx = rel_pose.x() / dt;
+            state_.last_iter_twist.vy = rel_pose.y() / dt;
+            state_.last_iter_twist.vz = rel_pose.z() / dt;
+            state_.last_iter_twist.wz = rel_pose.yaw() / dt;
+            MRPT_TODO("do omega_xyz part!");
+
+            state_.last_iter_twist_is_good = true;
+
+            MRPT_LOG_DEBUG_STREAM(
+                "Est.twist=" << state_.last_iter_twist.asString());
+            MRPT_LOG_DEBUG_STREAM(
+                "Time since last scan="
+                << mrpt::system::formatTimeInterval(dt));
+
+            // Create a new KF if the distance since the last one is large
+            // enough:
+            state_.accum_since_last_kf = state_.accum_since_last_kf + rel_pose;
+            const double dist_eucl_since_last =
+                state_.accum_since_last_kf.norm();
+            const double rot_since_last = 0;
+            MRPT_TODO("Add rotation threshold");
+
+            MRPT_LOG_DEBUG_FMT(
+                "Since last KF: dist=%5.03f m rotation=%.01f deg",
+                dist_eucl_since_last, mrpt::RAD2DEG(rot_since_last));
+
+            create_keyframe =
+                (icp_out.goodness > params_.min_icp_goodness &&
+                 (dist_eucl_since_last >
+                      params_.min_dist_xyz_between_keyframes ||
+                  rot_since_last > params_.min_rotation_between_keyframes));
+
+        }  // end: yes, we can do ICP
 
         // Should we create a new KF?
-        if (icp_out.goodness > params_.min_icp_goodness &&
-            (dist_eucl_since_last > params_.min_dist_xyz_between_keyframes ||
-             rot_since_last > params_.min_rotation_between_keyframes))
+        if (create_keyframe)
         {
             // Yes: create new KF
             // 1) New KeyFrame
@@ -336,6 +352,7 @@ void LidarICP::doProcessNewObservation(CObservation::Ptr& o)
                 state_.local_pose_graph.pcs[kf_out.new_kf_id.value()] =
                     this_obs_points;
             }
+            MRPT_LOG_INFO_STREAM("New KF: ID=" << *kf_out.new_kf_id);
 
             // 2) New SE(3) constraint between consecutive Keyframes:
             if (state_.last_kf != mola::INVALID_ID)
@@ -363,17 +380,29 @@ void LidarICP::doProcessNewObservation(CObservation::Ptr& o)
                         state_.last_kf, *kf_out.new_kf_id,
                         state_.accum_since_last_kf);
                 }
-            }
 
-            // Done.
-            MRPT_LOG_INFO_STREAM(
-                "New KF: ID=" << *kf_out.new_kf_id << " rel_pose="
-                              << state_.accum_since_last_kf.asString());
+                MRPT_LOG_INFO_STREAM(
+                    "New SE(3) factor: rel_pose="
+                    << state_.accum_since_last_kf.asString());
+            }
 
             // Reset accumulators:
             state_.accum_since_last_kf = mrpt::poses::CPose3D();
             state_.last_kf             = kf_out.new_kf_id.value();
         }  // end done add a new KF
+
+        // In any case, publish to the SLAM BackEnd what's our **current**
+        // vehicle pose, no matter if it's a keyframe or not:
+        {
+            BackEndBase::AdvertiseUpdatedLocalization_Input new_loc;
+            new_loc.reference_kf = state_.last_kf;
+            new_loc.pose         = state_.accum_since_last_kf.asTPose();
+
+            std::future<void> adv_pose_fut =
+                slam_backend_->advertiseUpdatedLocalization(new_loc);
+
+            adv_pose_fut.get();
+        }
 
         // Now, let's try to align this new KF against a few past KFs as well.
         // we'll do it in separate threads, with priorities so the latest KFs
@@ -661,11 +690,11 @@ void LidarICP::run_one_icp(const ICP_Input& in, ICP_Output& out)
         ASSERT_(in.to_pc.original && in.to_pc.sampled);
 
         MultiCloudICP::clouds_t pcs_from, pcs_to;
-        pcs_from.push_back(in.from_pc.sampled);
-        // pcs_from.push_back(in.from_pc.original);
+        // pcs_from.push_back(in.from_pc.sampled);
+        pcs_from.push_back(in.from_pc.original);
 
-        pcs_to.push_back(in.to_pc.sampled);
-        // pcs_to.push_back(in.to_pc.original);
+        // pcs_to.push_back(in.to_pc.sampled);
+        pcs_to.push_back(in.to_pc.original);
 
         unsigned int decim = 1;
         if (params_.decimate_to_point_count > 0)
