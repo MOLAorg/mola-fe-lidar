@@ -11,6 +11,7 @@
  */
 
 #include <mola-fe-lidar-icp/MultiCloudICP.h>
+#include <mrpt/core/exceptions.h>
 #include <mrpt/tfest/se3.h>
 
 using namespace mola;
@@ -43,10 +44,19 @@ void MultiCloudICP::align(
     // them, in such a way that different points are used in each iteration.
     mp.offset_other_map_points = 0;
 
-    // Count of points in point clouds #1:
-    size_t pointcount1 = 0;
+    // Count of points:
+    size_t pointcount1 = 0, pointcount2 = 0;
     for (size_t layer = 0; layer < nLayers; layer++)
+    {
         pointcount1 += pcs1[layer]->size();
+        pointcount2 += pcs2[layer]->size();
+        ASSERT_(
+            (pcs1[layer]->size() == 0 && pcs2[layer]->size() == 0) ||
+            (pcs1[layer]->size() > 0 && pcs2[layer]->size() > 0));
+    }
+
+    ASSERT_(pointcount1 > 0);
+    ASSERT_(pointcount2 > 0);
 
     // ------------------------------------------------------
     //					The ICP loop
