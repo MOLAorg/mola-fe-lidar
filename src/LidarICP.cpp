@@ -358,7 +358,10 @@ void LidarICP::doProcessNewObservation(CObservation::Ptr& o)
             if (state_.last_kf != mola::INVALID_ID)
             {
                 std::future<BackEndBase::AddFactor_Output> factor_out_fut;
-                mola::FactorRelativePose3                  fPose3(
+                // Important: Use the "constant velocity model" factor
+                // for velocity to be taken into account in this edge between
+                // consecutive KFs:
+                mola::FactorRelativePose3ConstVel fPose3(
                     state_.last_kf, kf_out.new_kf_id.value(),
                     state_.accum_since_last_kf.asTPose());
 
