@@ -103,11 +103,15 @@ class LidarICP : public FrontEndBase
 
     struct pointclouds_t
     {
-        /** The original pointcloud, with all points */
-        mrpt::maps::CPointsMap::Ptr original{};
+        /** Different "layers" in which a point cloud is decomposed.
+         * For example: "edges", "planes", etc.
+         */
+        std::map<std::string, mrpt::maps::CPointsMap::Ptr> layers;
 
-        /** A reduced point count version, with the key features only */
-        mrpt::maps::CPointsMap::Ptr sampled{};
+        inline bool hasLayer(const std::string& s) const
+        {
+            return layers.find(s) != layers.end();
+        }
     };
 
     /** All variables that hold the algorithm state */
@@ -177,8 +181,7 @@ class LidarICP : public FrontEndBase
      */
     void doCheckForNonAdjacentKFs(ICP_Input::Ptr d);
 
-    void filterPointCloud(
-        const mrpt::maps::CPointsMap& pc, mrpt::maps::CPointsMap& pc_out);
+    void filterPointCloud(pointclouds_t& pcs);
 
     std::mutex local_pose_graph_mtx;
 

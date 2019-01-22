@@ -23,9 +23,14 @@ void MultiCloudICP::align(
 {
     MRPT_START
 
+    // ICP uses KD-trees.
+    // kd-trees have each own mutexes to ensure well-defined behavior in
+    // multi-threading apps.
+
     ASSERT_EQUAL_(pcs1.size(), pcs2.size());
     ASSERT_(!pcs1.empty());
     const auto nLayers = pcs1.size();
+    ASSERT_(nLayers >= 1);
 
     // Reset output:
     result = Results();

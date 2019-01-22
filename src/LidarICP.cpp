@@ -194,29 +194,21 @@ void LidarICP::doProcessNewObservation(CObservation::Ptr& o)
             ProfilerEntry tle(
                 profiler_, "doProcessNewObservation.1.obs2pointcloud");
 
-            this_obs_points.original = mrpt::maps::CSimplePointsMap::Create();
-            this_obs_points.sampled  = mrpt::maps::CSimplePointsMap::Create();
+            const auto& pc = this_obs_points.layers["original"] =
+                mrpt::maps::CSimplePointsMap::Create();
 
-            have_points = this_obs_points.original->insertObservationPtr(o);
+            have_points = pc->insertObservationPtr(o);
         }
 
         // Filter: keep corner areas only:
         {
             ProfilerEntry tle(
                 profiler_, "doProcessNewObservation.2.filter_pointclouds");
+            // filterPointCloud(this_obs_points);
 
-            filterPointCloud(
-                *this_obs_points.original, *this_obs_points.sampled);
-        }
-
-        // Ensure kd-trees are built.
-        // kd-trees have each own mutexes to ensure well-defined behavior:
-        {
-            ProfilerEntry tle(
-                profiler_, "doProcessNewObservation.3.build_kdtrees");
-
-            this_obs_points.original->kdTreeEnsureIndexBuilt3D();
-            this_obs_points.sampled->kdTreeEnsureIndexBuilt3D();
+            // Remove the original, full-res point cloud to save memory:
+            // this_obs_points.layers.erase("original");
+            MRPT_TODO("Remove again!");
         }
 
         // Store for next step:
@@ -237,7 +229,7 @@ void LidarICP::doProcessNewObservation(CObservation::Ptr& o)
         bool create_keyframe = false;
 
         // First time we cannot do ICP since we need at least two pointclouds:
-        if (!last_points.original)
+        if (last_points.layers.empty())
         {
             // Skip ICP.
             MRPT_LOG_DEBUG("First pointcloud: skipping ICP.");
@@ -686,28 +678,29 @@ void LidarICP::run_one_icp(const ICP_Input& in, ICP_Output& out)
 
     MRPT_START
 
+    bool ended_in_error = false;
     {
         ProfilerEntry tle(profiler_, "run_one_icp");
 
-        ASSERT_(in.from_pc.original && in.from_pc.sampled);
-        ASSERT_(in.to_pc.original && in.to_pc.sampled);
-
+        size_t                  largest_pc_count = 1;
         MultiCloudICP::clouds_t pcs_from, pcs_to;
-        // pcs_from.push_back(in.from_pc.sampled);
-        pcs_from.push_back(in.from_pc.original);
+        for (auto& layer : in.from_pc.layers)
+        {
+            ASSERT_(in.to_pc.hasLayer(layer.first));
+            pcs_from.push_back(layer.second);
+            pcs_to.push_back(in.to_pc.layers.find(layer.first)->second);
 
-        // pcs_to.push_back(in.to_pc.sampled);
-        pcs_to.push_back(in.to_pc.original);
+            mrpt::keep_max(largest_pc_count, layer.second->size());
+        }
 
         unsigned int decim = 1;
         if (params_.decimate_to_point_count > 0)
             decim = static_cast<unsigned>(
-                in.from_pc.original->size() / params_.decimate_to_point_count);
+                largest_pc_count / params_.decimate_to_point_count);
 
         MRPT_LOG_DEBUG_STREAM(
-            "MRPT ICP: `to` point count="
-            << in.to_pc.sampled->size() << " `from` point count="
-            << in.from_pc.sampled->size() << " decimation=" << decim);
+            "MRPT ICP: max point count=" << largest_pc_count
+                                         << " decimation=" << decim);
 
         ASSERT_(!in.icp_params.empty());
 
@@ -722,16 +715,26 @@ void LidarICP::run_one_icp(const ICP_Input& in, ICP_Output& out)
             MultiCloudICP::align(
                 pcs_from, pcs_to, current_solution, icp_params, icp_result);
 
-            // Keep as init value for next stage:
-            current_solution = icp_result.optimal_tf.mean.asTPose();
+            if (icp_result.goodness > 0)
+            {
+                // Keep as init value for next stage:
+                current_solution = icp_result.optimal_tf.mean.asTPose();
+            }
+            else
+            {
+                ended_in_error = true;
+            }
 
             out.found_pose_to_wrt_from = icp_result.optimal_tf;
             out.goodness               = icp_result.goodness;
 
             MRPT_LOG_DEBUG_FMT(
-                "ICP stage #%u: goodness=%.03f iters=%u rel_pose=%s", stage,
-                out.goodness, static_cast<unsigned int>(icp_result.nIterations),
-                out.found_pose_to_wrt_from.getMeanVal().asString().c_str());
+                "ICP stage #%u (kind=%u): goodness=%.03f iters=%u rel_pose=%s "
+                "termReason=%u",
+                stage, static_cast<unsigned int>(in.align_kind), out.goodness,
+                static_cast<unsigned int>(icp_result.nIterations),
+                out.found_pose_to_wrt_from.getMeanVal().asString().c_str(),
+                static_cast<unsigned int>(icp_result.terminationReason));
         }
 
         // Check quality of match:
@@ -742,7 +745,8 @@ void LidarICP::run_one_icp(const ICP_Input& in, ICP_Output& out)
     MRPT_TODO("Move this to its own method");
 
     // Save debug files for debugging ICP quality
-    bool gen_debug = (in.align_kind == AlignKind::LidarOdometry &&
+    bool gen_debug = ended_in_error ||
+                     (in.align_kind == AlignKind::LidarOdometry &&
                       params_.debug_save_lidar_odometry) ||
                      (in.align_kind == AlignKind::NearbyAlign &&
                       params_.debug_save_extra_edges) ||
@@ -751,101 +755,115 @@ void LidarICP::run_one_icp(const ICP_Input& in, ICP_Output& out)
 
     if (gen_debug)
     {
-        auto fil_name_prefix = mrpt::system::fileNameStripInvalidChars(
-            getModuleInstanceName() + mrpt::format(
-                                          "_debug_ICP_%s_%05u",
-                                          in.debug_str.c_str(),
-                                          debug_dump_icp_file_counter++));
+        const auto num_pc_layers = in.from_pc.layers.size();
+        debug_dump_icp_file_counter++;
 
-        // Init:
-        mrpt::opengl::COpenGLScene scene;
-
-        scene.insert(mrpt::opengl::stock_objects::CornerXYZSimple(2.0f, 4.0f));
-        auto gl_from = mrpt::opengl::CSetOfObjects::Create();
-        in.from_pc.sampled->renderOptions.color =
-            mrpt::img::TColorf(.0f, .0f, 1.0f);
-        in.from_pc.sampled->getAs3DObject(gl_from);
-        gl_from->setName("KF_from"s);
-        gl_from->enableShowName();
-        scene.insert(gl_from);
-
-        auto gl_to = mrpt::opengl::CSetOfObjects::Create();
-        gl_to->insert(mrpt::opengl::stock_objects::CornerXYZSimple(1.0f, 2.0f));
-        in.to_pc.sampled->renderOptions.color =
-            mrpt::img::TColorf(1.0f, .0f, .0f);
-        in.to_pc.sampled->getAs3DObject(gl_to);
-        gl_to->setName("KF_to"s);
-        gl_to->enableShowName();
-        gl_to->setPose(in.init_guess_to_wrt_from);
-        scene.insert(gl_to);
-
-        auto gl_info  = mrpt::opengl::CText::Create(),
-             gl_info2 = mrpt::opengl::CText::Create();
-        gl_info->setLocation(0., 0., 5.);
-        gl_info2->setLocation(0., 0., 4.8);
-        scene.insert(gl_info);
-        scene.insert(gl_info2);
-
+        for (unsigned int l = 0; l < num_pc_layers; l++)
         {
-            std::ostringstream ss;
-            ss << "to_ID     = " << in.to_id << " from_ID   = " << in.from_id
-               << " | " << in.debug_str;
-            gl_info->setString(ss.str());
-        }
-        {
-            std::ostringstream ss;
-            ss << "init_pose = " << in.init_guess_to_wrt_from.asString();
-            gl_info2->setString(ss.str());
-        }
+            auto fil_name_prefix = mrpt::system::fileNameStripInvalidChars(
+                getModuleInstanceName() +
+                mrpt::format(
+                    "_debug_ICP_%s_%05u_layer%02u", in.debug_str.c_str(),
+                    static_cast<unsigned int>(debug_dump_icp_file_counter), l));
 
-        const auto fil_name_init = fil_name_prefix + "_0init.3Dscene"s;
-        if (scene.saveToFile(fil_name_init))
-            MRPT_LOG_DEBUG_STREAM(
-                "Wrote debug init ICP scene to: " << fil_name_init);
-        else
-            MRPT_LOG_ERROR_STREAM(
-                "Error saving init ICP scene to :" << fil_name_init);
+            // Init:
+            mrpt::opengl::COpenGLScene scene;
 
-        // Final:
-        const auto final_pose = out.found_pose_to_wrt_from.getMeanVal();
-        gl_to->setPose(final_pose);
+            auto it_from = in.from_pc.layers.begin();
+            std::advance(it_from, l);
+            auto it_to = in.to_pc.layers.begin();
+            std::advance(it_to, l);
 
-        {
-            std::ostringstream ss;
-            ss << "to_ID     = " << in.to_id << " from_ID   = " << in.from_id;
-            gl_info->setString(ss.str());
-        }
-        {
-            std::ostringstream ss;
-            ss << " final_pose = " << final_pose.asString()
-               << " goodness: " << out.goodness * 100.0;
+            scene.insert(
+                mrpt::opengl::stock_objects::CornerXYZSimple(2.0f, 4.0f));
+            auto gl_from = mrpt::opengl::CSetOfObjects::Create();
+            it_from->second->renderOptions.color =
+                mrpt::img::TColorf(.0f, .0f, 1.0f);
+            it_from->second->getAs3DObject(gl_from);
+            gl_from->setName("KF_from"s);
+            gl_from->enableShowName();
+            scene.insert(gl_from);
 
-            gl_info2->setString(ss.str());
-        }
+            auto gl_to = mrpt::opengl::CSetOfObjects::Create();
+            gl_to->insert(
+                mrpt::opengl::stock_objects::CornerXYZSimple(1.0f, 2.0f));
+            it_to->second->renderOptions.color =
+                mrpt::img::TColorf(1.0f, .0f, .0f);
+            it_to->second->getAs3DObject(gl_to);
+            gl_to->setName("KF_to"s);
+            gl_to->enableShowName();
+            gl_to->setPose(in.init_guess_to_wrt_from);
+            scene.insert(gl_to);
 
-        const auto fil_name_final = fil_name_prefix + "_1final.3Dscene"s;
-        if (scene.saveToFile(fil_name_final))
-            MRPT_LOG_DEBUG_STREAM(
-                "Wrote debug final ICP scene to: " << fil_name_final);
-        else
-            MRPT_LOG_ERROR_STREAM(
-                "Error saving final ICP scene to :" << fil_name_final);
+            auto gl_info  = mrpt::opengl::CText::Create(),
+                 gl_info2 = mrpt::opengl::CText::Create();
+            gl_info->setLocation(0., 0., 5.);
+            gl_info2->setLocation(0., 0., 4.8);
+            scene.insert(gl_info);
+            scene.insert(gl_info2);
 
-        // Also: save as Rawlog for ICP debugging in RawLogViewer app:
-        {
-            mrpt::obs::CRawlog rawlog;
             {
-                auto pc         = mrpt::obs::CObservationPointCloud::Create();
-                pc->pointcloud  = in.from_pc.sampled;
-                pc->sensorLabel = "from_sampled";
-                rawlog.addObservationMemoryReference(pc);
+                std::ostringstream ss;
+                ss << "to_ID     = " << in.to_id
+                   << " from_ID   = " << in.from_id << " | " << in.debug_str;
+                gl_info->setString(ss.str());
             }
             {
-                auto pc         = mrpt::obs::CObservationPointCloud::Create();
-                pc->pointcloud  = in.to_pc.sampled;
-                pc->sensorLabel = "to_sampled";
-                rawlog.addObservationMemoryReference(pc);
+                std::ostringstream ss;
+                ss << "init_pose = " << in.init_guess_to_wrt_from.asString();
+                gl_info2->setString(ss.str());
             }
+
+            const auto fil_name_init = fil_name_prefix + "_0init.3Dscene"s;
+            if (scene.saveToFile(fil_name_init))
+                MRPT_LOG_DEBUG_STREAM(
+                    "Wrote debug init ICP scene to: " << fil_name_init);
+            else
+                MRPT_LOG_ERROR_STREAM(
+                    "Error saving init ICP scene to :" << fil_name_init);
+
+            // Final:
+            const auto final_pose = out.found_pose_to_wrt_from.getMeanVal();
+            gl_to->setPose(final_pose);
+
+            {
+                std::ostringstream ss;
+                ss << "to_ID     = " << in.to_id
+                   << " from_ID   = " << in.from_id;
+                gl_info->setString(ss.str());
+            }
+            {
+                std::ostringstream ss;
+                ss << " final_pose = " << final_pose.asString()
+                   << " goodness: " << out.goodness * 100.0;
+
+                gl_info2->setString(ss.str());
+            }
+
+            const auto fil_name_final = fil_name_prefix + "_1final.3Dscene"s;
+            if (scene.saveToFile(fil_name_final))
+                MRPT_LOG_DEBUG_STREAM(
+                    "Wrote debug final ICP scene to: " << fil_name_final);
+            else
+                MRPT_LOG_ERROR_STREAM(
+                    "Error saving final ICP scene to :" << fil_name_final);
+
+            // Also: save as Rawlog for ICP debugging in RawLogViewer app:
+            {
+#if 0
+                mrpt::obs::CRawlog rawlog;
+                {
+                    auto pc = mrpt::obs::CObservationPointCloud::Create();
+                    pc->pointcloud  = in.from_pc.sampled;
+                    pc->sensorLabel = "from_sampled";
+                    rawlog.addObservationMemoryReference(pc);
+                }
+                {
+                    auto pc = mrpt::obs::CObservationPointCloud::Create();
+                    pc->pointcloud  = in.to_pc.sampled;
+                    pc->sensorLabel = "to_sampled";
+                    rawlog.addObservationMemoryReference(pc);
+                }
             {
                 auto pc         = mrpt::obs::CObservationPointCloud::Create();
                 pc->pointcloud  = in.from_pc.original;
@@ -858,7 +876,6 @@ void LidarICP::run_one_icp(const ICP_Input& in, ICP_Output& out)
                 pc->sensorLabel = "to_original";
                 rawlog.addObservationMemoryReference(pc);
             }
-#if 0
             {
                 mrpt::config::CConfigFileMemory cfg;
                 in.icp_params.saveToConfigFile(cfg, "ICP");
@@ -867,25 +884,33 @@ void LidarICP::run_one_icp(const ICP_Input& in, ICP_Output& out)
                 comm->text = cfg.getContent();
                 rawlog.addObservationMemoryReference(comm);
             }
-#endif
 
             const auto fil_name_rawlog = fil_name_prefix + ".rawlog"s;
             if (rawlog.saveToRawLogFile(fil_name_rawlog))
                 MRPT_LOG_DEBUG_STREAM(
                     "Wrote ICP debug rawlog: " << fil_name_rawlog);
+#endif
+            }
         }
     }
 
     MRPT_END
 }
 
-void LidarICP::filterPointCloud(
-    const mrpt::maps::CPointsMap& pc, mrpt::maps::CPointsMap& pc_out)
+void LidarICP::filterPointCloud(pointclouds_t& pcs)
 {
     MRPT_START
 
-    pc_out.clear();
-    pc_out.reserve(pc.size() / 10);
+    // Get a ref to the input, full resolution point cloud:
+    const auto& pcptr = pcs.layers["original"];
+    ASSERT_(pcptr);
+    const auto& pc = *pcptr;
+
+    auto& pc_edges = pcs.layers["edges"];
+    if (!pc_edges) pc_edges = mrpt::maps::CSimplePointsMap::Create();
+
+    pc_edges->clear();
+    pc_edges->reserve(pc.size() / 10);
 
     state_.filter_grid.clear();
     state_.filter_grid.processPointCloud(pc);
@@ -947,7 +972,7 @@ void LidarICP::filterPointCloud(
             for (size_t i = 0; i < vxl_pts.indices.size(); i++)
             {
                 const auto pt_idx = vxl_pts.indices[i];
-                pc_out.insertPointFast(xs[pt_idx], ys[pt_idx], zs[pt_idx]);
+                pc_edges->insertPointFast(xs[pt_idx], ys[pt_idx], zs[pt_idx]);
             }
         }
     }
