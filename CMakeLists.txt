@@ -31,11 +31,26 @@ find_package(MRPT 1.9.9 REQUIRED COMPONENTS slam graphs)
 target_link_libraries(${PROJECT_NAME}
   PUBLIC
     mola-kernel
+    mrpt::graphs
+    mrpt::slam
 )
 
-# Private lib Dependencies:
-target_link_libraries(${PROJECT_NAME}
-  PRIVATE
-    mrpt::slam
-    mrpt::graphs
+# ----------------------
+# define app target:
+add_executable(test-mola-fe-lidar-icp-segment-scan
+    tests/test-mola-fe-lidar-icp-segment-scan.cpp)
+
+# Define common flags:
+mola_set_target_build_options(test-mola-fe-lidar-icp-segment-scan)
+mola_configure_app(test-mola-fe-lidar-icp-segment-scan)
+
+# find dependencies:
+find_package(mrpt-tclap) # tclap wrapper, useful for Windows, etc.
+
+# Dependencies:
+target_link_libraries(test-mola-fe-lidar-icp-segment-scan
+    mrpt::tclap
+#    yaml-cpp
+    ${PROJECT_NAME}
 )
+
