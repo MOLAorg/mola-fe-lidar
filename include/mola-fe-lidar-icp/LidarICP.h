@@ -67,8 +67,10 @@ class LidarICP : public FrontEndBase
         unsigned int decimate_to_point_count{500};
 
         /** Size of the voxel filter [meters] */
-        double voxel_filter_resolution{.5};
-        double voxel_filter_max_e2_e0{30.}, voxel_filter_max_e1_e0{30.};
+        double       voxel_filter_resolution{.5};
+        unsigned int voxel_filter_decimation{1};
+        float        voxel_filter_max_e2_e0{30.f}, voxel_filter_max_e1_e0{30.f};
+        float voxel_filter_min_e2_e0{100.f}, voxel_filter_min_e1_e0{100.f};
 
         /** Distance range to check for additional SE(3) edges */
         double min_dist_to_matching{6.0};
@@ -94,13 +96,6 @@ class LidarICP : public FrontEndBase
 
     constexpr static topological_dist_t MIN_DIST_TO_CONSIDER_LOOP_CLOSURE = 10;
 
-   private:
-    /** The worker thread pool with 1 thread for processing incomming scans */
-    mola::WorkerThreadsPool worker_pool_{1};
-
-    /** Worker thread to align a new KF against past KFs:*/
-    mola::WorkerThreadsPool worker_pool_past_KFs_{3};
-
     struct pointclouds_t
     {
         /** Different "layers" in which a point cloud is decomposed.
@@ -113,6 +108,43 @@ class LidarICP : public FrontEndBase
             return layers.find(s) != layers.end();
         }
     };
+    void filterPointCloud(pointclouds_t& pcs);
+
+    enum class AlignKind : uint8_t
+    {
+        LidarOdometry,
+        NearbyAlign,
+        LoopClosure
+    };
+
+    struct ICP_Input
+    {
+        using Ptr = std::shared_ptr<ICP_Input>;
+
+        AlignKind           align_kind{AlignKind::LidarOdometry};
+        id_t                to_id{mola::INVALID_ID};
+        id_t                from_id{mola::INVALID_ID};
+        pointclouds_t       to_pc, from_pc;
+        mrpt::math::TPose3D init_guess_to_wrt_from;
+
+        std::vector<MultiCloudICP::Parameters> icp_params;
+
+        /** used to identity where does this request come from */
+        std::string debug_str;
+    };
+    struct ICP_Output
+    {
+        double                          goodness{.0};
+        mrpt::poses::CPose3DPDFGaussian found_pose_to_wrt_from;
+    };
+    void run_one_icp(const ICP_Input& in, ICP_Output& out);
+
+   private:
+    /** The worker thread pool with 1 thread for processing incomming scans */
+    mola::WorkerThreadsPool worker_pool_{1};
+
+    /** Worker thread to align a new KF against past KFs:*/
+    mola::WorkerThreadsPool worker_pool_past_KFs_{3};
 
     /** All variables that hold the algorithm state */
     struct MethodState
@@ -146,42 +178,11 @@ class LidarICP : public FrontEndBase
     void doProcessNewObservation(CObservation::Ptr& o);
     void checkForNearbyKFs();
 
-    enum class AlignKind : uint8_t
-    {
-        LidarOdometry,
-        NearbyAlign,
-        LoopClosure
-    };
-
-    struct ICP_Input
-    {
-        using Ptr = std::shared_ptr<ICP_Input>;
-
-        AlignKind           align_kind{AlignKind::LidarOdometry};
-        id_t                to_id{mola::INVALID_ID};
-        id_t                from_id{mola::INVALID_ID};
-        pointclouds_t       to_pc, from_pc;
-        mrpt::math::TPose3D init_guess_to_wrt_from;
-
-        std::vector<MultiCloudICP::Parameters> icp_params;
-
-        /** used to identity where does this request come from */
-        std::string debug_str;
-    };
-    struct ICP_Output
-    {
-        double                          goodness{.0};
-        mrpt::poses::CPose3DPDFGaussian found_pose_to_wrt_from;
-    };
-    void run_one_icp(const ICP_Input& in, ICP_Output& out);
-
     /** Invoked from doProcessNewObservation() whenever a new KF is created,
      * to check for additional edges apart of the "odometry edge", to increase
      * the quality of the estimation by increasing the pose-graph density.
      */
     void doCheckForNonAdjacentKFs(ICP_Input::Ptr d);
-
-    void filterPointCloud(pointclouds_t& pcs);
 
     std::mutex local_pose_graph_mtx;
 

@@ -25,7 +25,7 @@ mola_set_target_build_options(${PROJECT_NAME})
 mola_configure_library(${PROJECT_NAME})
 
 # find dependencies:
-find_package(MRPT 1.9.9 REQUIRED COMPONENTS slam graphs)
+find_package(MRPT 1.9.9 REQUIRED COMPONENTS slam graphs gui tclap)
 
 # Public lib Dependencies:
 target_link_libraries(${PROJECT_NAME}
@@ -44,13 +44,28 @@ add_executable(test-mola-fe-lidar-icp-segment-scan
 mola_set_target_build_options(test-mola-fe-lidar-icp-segment-scan)
 mola_configure_app(test-mola-fe-lidar-icp-segment-scan)
 
-# find dependencies:
-find_package(mrpt-tclap) # tclap wrapper, useful for Windows, etc.
-
 # Dependencies:
 target_link_libraries(test-mola-fe-lidar-icp-segment-scan
     mrpt::tclap
-#    yaml-cpp
+    mrpt::gui
+    yaml-cpp
+    ${PROJECT_NAME}
+)
+
+# ----------------------
+# define app target:
+add_executable(test-mola-fe-lidar-icp-align
+    tests/test-mola-fe-lidar-icp-align.cpp)
+
+# Define common flags:
+mola_set_target_build_options(test-mola-fe-lidar-icp-align)
+mola_configure_app(test-mola-fe-lidar-icp-align)
+
+# Dependencies:
+target_link_libraries(test-mola-fe-lidar-icp-align
+    mrpt::tclap
+    mrpt::gui
+    yaml-cpp
     ${PROJECT_NAME}
 )
 

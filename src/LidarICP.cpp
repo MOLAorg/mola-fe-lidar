@@ -98,8 +98,11 @@ void LidarICP::initialize(const std::string& cfg_block)
     YAML_LOAD_OPT(params_, min_icp_goodness_lc, double);
     YAML_LOAD_OPT(params_, decimate_to_point_count, unsigned int);
     YAML_LOAD_OPT(params_, voxel_filter_resolution, double);
-    YAML_LOAD_OPT(params_, voxel_filter_max_e2_e0, double);
-    YAML_LOAD_OPT(params_, voxel_filter_max_e1_e0, double);
+    YAML_LOAD_OPT(params_, voxel_filter_decimation, unsigned int);
+    YAML_LOAD_OPT(params_, voxel_filter_max_e2_e0, float);
+    YAML_LOAD_OPT(params_, voxel_filter_max_e1_e0, float);
+    YAML_LOAD_OPT(params_, voxel_filter_min_e2_e0, float);
+    YAML_LOAD_OPT(params_, voxel_filter_min_e1_e0, float);
 
     YAML_LOAD_OPT(params_, min_dist_to_matching, double);
     YAML_LOAD_OPT(params_, max_dist_to_matching, double);
@@ -204,11 +207,11 @@ void LidarICP::doProcessNewObservation(CObservation::Ptr& o)
         {
             ProfilerEntry tle(
                 profiler_, "doProcessNewObservation.2.filter_pointclouds");
-            // filterPointCloud(this_obs_points);
+
+            filterPointCloud(this_obs_points);
 
             // Remove the original, full-res point cloud to save memory:
-            // this_obs_points.layers.erase("original");
-            MRPT_TODO("Remove again!");
+            this_obs_points.layers.erase("original");
         }
 
         // Store for next step:
@@ -565,9 +568,14 @@ void LidarICP::checkForNearbyKFs()
 
     // Actually send the tasks to the worker thread, firstly filtering
     // some of them to reduce the computational cost:
-    // Nearby checks: send all
-    for (const auto& d : nearby_checks)
+    // Nearby checks: send a maximum of "N"
+    const size_t maxNearbyChecks = 3;
+    const size_t nNearbyChecks   = nearby_checks.size();
+    const size_t nearbyCheckDecim =
+        std::max(static_cast<size_t>(1U), nNearbyChecks / maxNearbyChecks);
+    for (size_t idx = 0; idx < nNearbyChecks; idx += nearbyCheckDecim)
     {
+        const auto& d = nearby_checks[idx];
         worker_pool_past_KFs_.enqueue(
             &LidarICP::doCheckForNonAdjacentKFs, this, d);
 
@@ -678,7 +686,6 @@ void LidarICP::run_one_icp(const ICP_Input& in, ICP_Output& out)
 
     MRPT_START
 
-    bool ended_in_error = false;
     {
         ProfilerEntry tle(profiler_, "run_one_icp");
 
@@ -686,9 +693,8 @@ void LidarICP::run_one_icp(const ICP_Input& in, ICP_Output& out)
         MultiCloudICP::clouds_t pcs_from, pcs_to;
         for (auto& layer : in.from_pc.layers)
         {
-            ASSERT_(in.to_pc.hasLayer(layer.first));
             pcs_from.push_back(layer.second);
-            pcs_to.push_back(in.to_pc.layers.find(layer.first)->second);
+            pcs_to.push_back(in.to_pc.layers.at(layer.first));
 
             mrpt::keep_max(largest_pc_count, layer.second->size());
         }
@@ -720,10 +726,6 @@ void LidarICP::run_one_icp(const ICP_Input& in, ICP_Output& out)
                 // Keep as init value for next stage:
                 current_solution = icp_result.optimal_tf.mean.asTPose();
             }
-            else
-            {
-                ended_in_error = true;
-            }
 
             out.found_pose_to_wrt_from = icp_result.optimal_tf;
             out.goodness               = icp_result.goodness;
@@ -745,8 +747,7 @@ void LidarICP::run_one_icp(const ICP_Input& in, ICP_Output& out)
     MRPT_TODO("Move this to its own method");
 
     // Save debug files for debugging ICP quality
-    bool gen_debug = ended_in_error ||
-                     (in.align_kind == AlignKind::LidarOdometry &&
+    bool gen_debug = (in.align_kind == AlignKind::LidarOdometry &&
                       params_.debug_save_lidar_odometry) ||
                      (in.align_kind == AlignKind::NearbyAlign &&
                       params_.debug_save_extra_edges) ||
@@ -903,14 +904,18 @@ void LidarICP::filterPointCloud(pointclouds_t& pcs)
 
     // Get a ref to the input, full resolution point cloud:
     const auto& pcptr = pcs.layers["original"];
-    ASSERT_(pcptr);
+    ASSERTMSG_(pcptr, "Missing point cloud layer: `original`");
     const auto& pc = *pcptr;
 
-    auto& pc_edges = pcs.layers["edges"];
+    auto& pc_edges  = pcs.layers["edges"];
+    auto& pc_planes = pcs.layers["planes"];
     if (!pc_edges) pc_edges = mrpt::maps::CSimplePointsMap::Create();
+    if (!pc_planes) pc_planes = mrpt::maps::CSimplePointsMap::Create();
 
     pc_edges->clear();
     pc_edges->reserve(pc.size() / 10);
+    pc_planes->clear();
+    pc_planes->reserve(pc.size() / 10);
 
     state_.filter_grid.clear();
     state_.filter_grid.processPointCloud(pc);
@@ -919,10 +924,12 @@ void LidarICP::filterPointCloud(pointclouds_t& pcs)
     const auto& ys = pc.getPointsBufferRef_y();
     const auto& zs = pc.getPointsBufferRef_z();
 
-    const float max_e20 = static_cast<float>(params_.voxel_filter_max_e2_e0);
-    const float max_e10 = static_cast<float>(params_.voxel_filter_max_e1_e0);
+    const float max_e20 = params_.voxel_filter_max_e2_e0;
+    const float max_e10 = params_.voxel_filter_max_e1_e0;
+    const float min_e20 = params_.voxel_filter_min_e2_e0;
+    const float min_e10 = params_.voxel_filter_min_e1_e0;
 
-    std::size_t nGoodVoxels = 0, nTotalVoxels = 0;
+    std::size_t nEdgeVoxels = 0, nPlaneVoxels = 0, nTotalVoxels = 0;
     for (const auto& vxl_pts : state_.filter_grid.pts_voxels)
     {
         if (!vxl_pts.indices.empty()) nTotalVoxels++;
@@ -966,18 +973,38 @@ void LidarICP::filterPointCloud(pointclouds_t& pcs)
 
         const float e0 = eig_vals[0], e1 = eig_vals[1], e2 = eig_vals[2];
 
+        mrpt::maps::CPointsMap* dest = nullptr;
         if (e2 < max_e20 * e0 && e1 < max_e10 * e0)
         {
-            nGoodVoxels++;
-            for (size_t i = 0; i < vxl_pts.indices.size(); i++)
+            nEdgeVoxels++;
+            dest = pc_edges.get();
+        }
+        else if (e2 > min_e20 * e0 && e1 > min_e10 * e0)
+        {
+            // Filter out horizontal planes, since their uneven density
+            // makes ICP fail to converge.
+            // A plane on the ground has its 0'th eigenvector like [0 0 1]
+            const Eigen::Vector3f ev0 = esolver.eigenvectors().col(0);
+            // || mean.x > 10.0f || mean.y > 10.0f)
+            if (std::abs(ev0.z()) < 0.9f)
+            {
+                nPlaneVoxels++;
+                dest = pc_planes.get();
+            }
+        }
+        if (dest != nullptr)
+        {
+            for (size_t i = 0; i < vxl_pts.indices.size();
+                 i += params_.voxel_filter_decimation)
             {
                 const auto pt_idx = vxl_pts.indices[i];
-                pc_edges->insertPointFast(xs[pt_idx], ys[pt_idx], zs[pt_idx]);
+                dest->insertPointFast(xs[pt_idx], ys[pt_idx], zs[pt_idx]);
             }
         }
     }
     MRPT_LOG_DEBUG_STREAM(
-        "VoxelGridFilter: good voxels=" << nGoodVoxels << " out of "
-                                        << nTotalVoxels);
+        "[VoxelGridFilter] Voxel counts: total=" << nTotalVoxels
+                                                 << " edges=" << nEdgeVoxels
+                                                 << " planes=" << nPlaneVoxels);
     MRPT_END
 }
