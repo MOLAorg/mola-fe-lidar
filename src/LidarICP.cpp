@@ -106,6 +106,7 @@ void LidarICP::initialize(const std::string& cfg_block)
 
     YAML_LOAD_OPT(params_, min_dist_to_matching, double);
     YAML_LOAD_OPT(params_, max_dist_to_matching, double);
+    YAML_LOAD_OPT(params_, min_topo_dist_to_consider_loopclosure, unsigned int);
 
     load_icp_set_of_params(
         params_.icp_params_with_vel, cfg, "icp_params_with_vel.");
@@ -545,7 +546,7 @@ void LidarICP::checkForNearbyKFs()
 
             // Is this an extra edge for a nearby KF, or a potential loop
             // closure?
-            if (kf_topo_d < MIN_DIST_TO_CONSIDER_LOOP_CLOSURE)
+            if (kf_topo_d < params_.min_topo_dist_to_consider_loopclosure)
             {
                 // Regular, nearby KF-to-KF ICP check:
                 d->align_kind = AlignKind::NearbyAlign;

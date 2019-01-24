@@ -73,10 +73,11 @@ class LidarICP : public FrontEndBase
         float voxel_filter_min_e2_e0{100.f}, voxel_filter_min_e1_e0{100.f};
 
         /** Distance range to check for additional SE(3) edges */
-        double min_dist_to_matching{6.0};
-        double max_dist_to_matching{12.0};
+        double       min_dist_to_matching{6.0};
+        double       max_dist_to_matching{12.0};
+        unsigned int min_topo_dist_to_consider_loopclosure{20};
 
-        unsigned int max_KFs_local_graph{1000};
+        unsigned int max_KFs_local_graph{50000};
 
         /** ICP parameters for the case of having, or not, a good velocity model
          * that works a good prior. Each entry in the vector is an "ICP stage",
@@ -93,8 +94,6 @@ class LidarICP : public FrontEndBase
     Parameters params_;
 
     using topological_dist_t = std::size_t;
-
-    constexpr static topological_dist_t MIN_DIST_TO_CONSIDER_LOOP_CLOSURE = 10;
 
     struct pointclouds_t
     {
