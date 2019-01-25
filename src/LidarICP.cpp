@@ -106,6 +106,7 @@ void LidarICP::initialize(const std::string& cfg_block)
 
     YAML_LOAD_OPT(params_, min_dist_to_matching, double);
     YAML_LOAD_OPT(params_, max_dist_to_matching, double);
+    YAML_LOAD_OPT(params_, max_nearby_align_checks, unsigned int);
     YAML_LOAD_OPT(params_, min_topo_dist_to_consider_loopclosure, unsigned int);
 
     load_icp_set_of_params(
@@ -188,6 +189,9 @@ void LidarICP::doProcessNewObservation(CObservation::Ptr& o)
                 params_.min_time_between_scans)
         {
             // Drop observation.
+            MRPT_LOG_DEBUG(
+                "doProcessNewObservation: dropping observation, for "
+                "`min_time_between_scans`.");
             return;
         }
 
@@ -381,8 +385,9 @@ void LidarICP::doProcessNewObservation(CObservation::Ptr& o)
                 }
 
                 MRPT_LOG_INFO_STREAM(
-                    "New SE(3) factor: rel_pose="
-                    << state_.accum_since_last_kf.asString());
+                    "New FactorRelativePose3ConstVel: #"
+                    << state_.last_kf << " <=> #" << kf_out.new_kf_id.value()
+                    << ". rel_pose=" << state_.accum_since_last_kf.asString());
             }
 
             // Reset accumulators:
@@ -393,14 +398,17 @@ void LidarICP::doProcessNewObservation(CObservation::Ptr& o)
         // In any case, publish to the SLAM BackEnd what's our **current**
         // vehicle pose, no matter if it's a keyframe or not:
         {
+            ProfilerEntry tle(
+                profiler_,
+                "doProcessNewObservation.4.advertiseUpdatedLocalization");
+
             BackEndBase::AdvertiseUpdatedLocalization_Input new_loc;
+            new_loc.timestamp    = this_obs_tim;
             new_loc.reference_kf = state_.last_kf;
             new_loc.pose         = state_.accum_since_last_kf.asTPose();
 
             std::future<void> adv_pose_fut =
                 slam_backend_->advertiseUpdatedLocalization(new_loc);
-
-            adv_pose_fut.get();
         }
 
         // Now, let's try to align this new KF against a few past KFs as well.
@@ -416,7 +424,7 @@ void LidarICP::doProcessNewObservation(CObservation::Ptr& o)
         if (can_check_for_other_matches)
         {
             ProfilerEntry tle(
-                profiler_, "doProcessNewObservation.4.checkForNearbyKFs");
+                profiler_, "doProcessNewObservation.5.checkForNearbyKFs");
             checkForNearbyKFs();
         }
     }
@@ -515,8 +523,8 @@ void LidarICP::checkForNearbyKFs()
         // those two KFs:
         if (!edge_already_exists && worldmodel_)
         {
-            worldmodel_->entities_lock();
-            worldmodel_->factors_lock();
+            worldmodel_->entities_lock_for_read();
+            worldmodel_->factors_lock_for_read();
 
             const auto connected = worldmodel_->entity_neighbors(kf_id);
             if (connected.count(current_kf_id) != 0)
@@ -528,8 +536,8 @@ void LidarICP::checkForNearbyKFs()
                 edge_already_exists = false;
             }
 
-            worldmodel_->factors_unlock();
-            worldmodel_->entities_unlock();
+            worldmodel_->factors_unlock_for_read();
+            worldmodel_->entities_unlock_for_read();
         }
 
         if (!edge_already_exists)
@@ -570,10 +578,10 @@ void LidarICP::checkForNearbyKFs()
     // Actually send the tasks to the worker thread, firstly filtering
     // some of them to reduce the computational cost:
     // Nearby checks: send a maximum of "N"
-    const size_t maxNearbyChecks = 3;
-    const size_t nNearbyChecks   = nearby_checks.size();
-    const size_t nearbyCheckDecim =
-        std::max(static_cast<size_t>(1U), nNearbyChecks / maxNearbyChecks);
+    const size_t nNearbyChecks    = nearby_checks.size();
+    const size_t nearbyCheckDecim = std::max(
+        static_cast<size_t>(1U),
+        nNearbyChecks / params_.max_nearby_align_checks);
     for (size_t idx = 0; idx < nNearbyChecks; idx += nearbyCheckDecim)
     {
         const auto& d = nearby_checks[idx];
@@ -673,6 +681,11 @@ void LidarICP::doCheckForNonAdjacentKFs(ICP_Input::Ptr d)
                 state_.local_pose_graph.graph.insertEdgeAtEnd(
                     d->from_id, d->to_id, rel_pose);
             }
+
+            MRPT_LOG_INFO_STREAM(
+                "New FactorRelativePose3: #"
+                << d->from_id << " <=> #" << d->to_id
+                << ". rel_pose=" << rel_pose.asString());
         }
     }
     catch (const std::exception& e)
