@@ -160,7 +160,7 @@ void LidarICP::onNewObservation(CObservation::Ptr& o)
 
     const auto queued = worker_pool_.pendingTasks();
     profiler_.registerUserMeasure("onNewObservation.queue_length", queued);
-    if (queued > 5)
+    if (queued > 10)
     {
         MRPT_LOG_THROTTLE_ERROR(
             1.0, "Dropping observation due to worker threads too busy.");
@@ -966,15 +966,19 @@ void LidarICP::filterPointCloud(pointclouds_t& pcs)
     ASSERTMSG_(pcptr, "Missing point cloud layer: `original`");
     const auto& pc = *pcptr;
 
-    auto& pc_edges  = pcs.layers["edges"];
-    auto& pc_planes = pcs.layers["planes"];
+    auto& pc_edges      = pcs.layers["edges"];
+    auto& pc_planes     = pcs.layers["planes"];
+    auto& pc_full_decim = pcs.layers["full_decim"];
     if (!pc_edges) pc_edges = mrpt::maps::CSimplePointsMap::Create();
     if (!pc_planes) pc_planes = mrpt::maps::CSimplePointsMap::Create();
+    if (!pc_full_decim) pc_full_decim = mrpt::maps::CSimplePointsMap::Create();
 
     pc_edges->clear();
     pc_edges->reserve(pc.size() / 10);
     pc_planes->clear();
     pc_planes->reserve(pc.size() / 10);
+    pc_full_decim->clear();
+    pc_full_decim->reserve(pc.size() / 10);
 
     state_.filter_grid.clear();
     state_.filter_grid.processPointCloud(pc);
@@ -1051,14 +1055,13 @@ void LidarICP::filterPointCloud(pointclouds_t& pcs)
                 dest = pc_planes.get();
             }
         }
-        if (dest != nullptr)
+        for (size_t i = 0; i < vxl_pts.indices.size();
+             i += params_.voxel_filter_decimation)
         {
-            for (size_t i = 0; i < vxl_pts.indices.size();
-                 i += params_.voxel_filter_decimation)
-            {
-                const auto pt_idx = vxl_pts.indices[i];
+            const auto pt_idx = vxl_pts.indices[i];
+            if (dest != nullptr)
                 dest->insertPointFast(xs[pt_idx], ys[pt_idx], zs[pt_idx]);
-            }
+            pc_full_decim->insertPointFast(xs[pt_idx], ys[pt_idx], zs[pt_idx]);
         }
     }
     MRPT_LOG_DEBUG_STREAM(

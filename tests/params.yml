@@ -17,8 +17,8 @@ params:
     voxel_filter_decimation: 5
     voxel_filter_max_e2_e0: 10
     voxel_filter_max_e1_e0: 10
-    voxel_filter_min_e2_e0: 40
-    voxel_filter_min_e1_e0: 40
+    voxel_filter_min_e2_e0: 50
+    voxel_filter_min_e1_e0: 50
     # min/max distance to check for match/loop closure between KFs:
     min_dist_to_matching: 5.0
     max_dist_to_matching: 20.0
