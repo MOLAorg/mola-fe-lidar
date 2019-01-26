@@ -67,6 +67,7 @@ class LidarICP : public FrontEndBase
         unsigned int decimate_to_point_count{500};
 
         /** Size of the voxel filter [meters] */
+        unsigned int full_pointcloud_decimation{20};
         double       voxel_filter_resolution{.5};
         unsigned int voxel_filter_decimation{1};
         float        voxel_filter_max_e2_e0{30.f}, voxel_filter_max_e1_e0{30.f};

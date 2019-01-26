@@ -100,6 +100,7 @@ void LidarICP::initialize(const std::string& cfg_block)
     YAML_LOAD_OPT(params_, decimate_to_point_count, unsigned int);
     YAML_LOAD_OPT(params_, voxel_filter_resolution, double);
     YAML_LOAD_OPT(params_, voxel_filter_decimation, unsigned int);
+    YAML_LOAD_OPT(params_, full_pointcloud_decimation, unsigned int);
     YAML_LOAD_OPT(params_, voxel_filter_max_e2_e0, float);
     YAML_LOAD_OPT(params_, voxel_filter_max_e1_e0, float);
     YAML_LOAD_OPT(params_, voxel_filter_min_e2_e0, float);
@@ -389,7 +390,7 @@ void LidarICP::doProcessNewObservation(CObservation::Ptr& o)
                         state_.accum_since_last_kf);
                 }
 
-                MRPT_LOG_INFO_STREAM(
+                MRPT_LOG_DEBUG_STREAM(
                     "New FactorRelativePose3ConstVel: #"
                     << state_.last_kf << " <=> #" << kf_out.new_kf_id.value()
                     << ". rel_pose=" << state_.accum_since_last_kf.asString());
@@ -727,7 +728,7 @@ void LidarICP::doCheckForNonAdjacentKFs(ICP_Input::Ptr d)
                     d->from_id, d->to_id, rel_pose);
             }
 
-            MRPT_LOG_INFO_STREAM(
+            MRPT_LOG_DEBUG_STREAM(
                 "New FactorRelativePose3: #"
                 << d->from_id << " <=> #" << d->to_id
                 << ". rel_pose=" << rel_pose.asString());
@@ -748,6 +749,8 @@ void LidarICP::run_one_icp(const ICP_Input& in, ICP_Output& out)
     {
         ProfilerEntry tle(profiler_, "run_one_icp");
 
+        ASSERT_(!in.icp_params.empty());
+
         size_t                  largest_pc_count = 1;
         MultiCloudICP::clouds_t pcs_from, pcs_to;
         for (auto& layer : in.from_pc.layers)
@@ -763,16 +766,14 @@ void LidarICP::run_one_icp(const ICP_Input& in, ICP_Output& out)
             decim = static_cast<unsigned>(
                 largest_pc_count / params_.decimate_to_point_count);
 
-        MRPT_LOG_DEBUG_STREAM(
-            "MRPT ICP: max point count=" << largest_pc_count
-                                         << " decimation=" << decim);
-
-        ASSERT_(!in.icp_params.empty());
-
         mrpt::math::TPose3D current_solution = in.init_guess_to_wrt_from;
 
         for (unsigned int stage = 0; stage < in.icp_params.size(); stage++)
         {
+            MRPT_LOG_DEBUG_STREAM(
+                "MRPT ICP: max point count=" << largest_pc_count
+                                             << " decimation=" << decim);
+
             MultiCloudICP::Parameters icp_params       = in.icp_params[stage];
             icp_params.corresponding_points_decimation = decim;
 
@@ -1055,12 +1056,19 @@ void LidarICP::filterPointCloud(pointclouds_t& pcs)
                 dest = pc_planes.get();
             }
         }
+        if (dest != nullptr)
+        {
+            for (size_t i = 0; i < vxl_pts.indices.size();
+                 i += params_.voxel_filter_decimation)
+            {
+                const auto pt_idx = vxl_pts.indices[i];
+                dest->insertPointFast(xs[pt_idx], ys[pt_idx], zs[pt_idx]);
+            }
+        }
         for (size_t i = 0; i < vxl_pts.indices.size();
-             i += params_.voxel_filter_decimation)
+             i += params_.full_pointcloud_decimation)
         {
             const auto pt_idx = vxl_pts.indices[i];
-            if (dest != nullptr)
-                dest->insertPointFast(xs[pt_idx], ys[pt_idx], zs[pt_idx]);
             pc_full_decim->insertPointFast(xs[pt_idx], ys[pt_idx], zs[pt_idx]);
         }
     }

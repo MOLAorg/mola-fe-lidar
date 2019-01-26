@@ -92,6 +92,7 @@ void do_scan_align_test()
         mrpt::system::CTimeLoggerEntry tle(timlog, "filterPointCloud");
         module.filterPointCloud(pcs1);
     }
+
     mola::LidarICP::pointclouds_t pcs2;
     pcs2.layers["original"] = pc2;
     {
@@ -121,10 +122,10 @@ void do_scan_align_test()
     }
 
     for (const auto& l : pcs1.layers)
-        if (!l.first.compare("original"))
+        if (l.first.compare("original") != 0)
             icp_in.from_pc.layers[l.first] = l.second;
     for (const auto& l : pcs2.layers)
-        if (!l.first.compare("original"))
+        if (l.first.compare("original") != 0)
             icp_in.to_pc.layers[l.first] = l.second;
 
     mola::LidarICP::ICP_Output icp_out;

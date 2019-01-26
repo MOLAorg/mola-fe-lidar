@@ -14,6 +14,7 @@ params:
     # Size (resolution) of the voxel filter
     voxel_filter_resolution: 1.0  # [meters]
     # decimate as we filter by voxels (1=no decimation)
+    full_pointcloud_decimation: 25
     voxel_filter_decimation: 5
     voxel_filter_max_e2_e0: 10
     voxel_filter_max_e1_e0: 10
@@ -24,16 +25,16 @@ params:
     max_dist_to_matching: 20.0
     # Params for the MRPT ICP algoritm: See mrpt::slam::CICP for documentation
     # Case: WITH a good twist (velocity) model:
-    icp_params_with_vel.maxIterations:  5  50
+    icp_params_with_vel.maxIterations:  5  150
     icp_params_with_vel.thresholdDist: 1.0  0.5      # [meters]
     icp_params_with_vel.thresholdAng:  2.0  0.1     # [deg]
     # Case: WITHOUT a good twist (velocity) model:
-    icp_params_without_vel.maxIterations:   5     50
+    icp_params_without_vel.maxIterations:   5     150
     icp_params_without_vel.thresholdDist:   3.0   0.50  # [meters]
     icp_params_without_vel.thresholdAng:    2.0   0.10  # [deg]
     # Case: Loop closure
-    icp_params_loopclosure.maxIterations: 10    30    40
-    icp_params_loopclosure.thresholdDist: 30.0   1.0   0.30  # [meters]
+    icp_params_loopclosure.maxIterations: 10    30    140
+    icp_params_loopclosure.thresholdDist: 30.0   1.0   0.50  # [meters]
     icp_params_loopclosure.thresholdAng:   5.0   1.0   0.01  # [deg]
     # -----------------------------------------------------
     # DEBUG: Save all ICP pairings as 3Dscene files, for visual inspection
