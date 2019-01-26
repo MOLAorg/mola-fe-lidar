@@ -28,6 +28,7 @@
 #include <mrpt/opengl/CText.h>
 #include <mrpt/opengl/stock_objects.h>
 #include <mrpt/poses/CPose3DPDFGaussian.h>
+#include <mrpt/random.h>
 #include <mrpt/system/datetime.h>
 #include <mrpt/system/filesystem.h>
 #include <mrpt/system/string_utils.h>
@@ -106,8 +107,10 @@ void LidarICP::initialize(const std::string& cfg_block)
 
     YAML_LOAD_OPT(params_, min_dist_to_matching, double);
     YAML_LOAD_OPT(params_, max_dist_to_matching, double);
+    YAML_LOAD_OPT(params_, max_dist_to_loop_closure, double);
     YAML_LOAD_OPT(params_, max_nearby_align_checks, unsigned int);
     YAML_LOAD_OPT(params_, min_topo_dist_to_consider_loopclosure, unsigned int);
+    YAML_LOAD_OPT(params_, loop_closure_montecarlo_samples, unsigned int);
 
     load_icp_set_of_params(
         params_.icp_params_with_vel, cfg, "icp_params_with_vel.");
@@ -156,10 +159,12 @@ void LidarICP::onNewObservation(CObservation::Ptr& o)
     if (o->sensorLabel != raw_sensor_label_) return;
 
     const auto queued = worker_pool_.pendingTasks();
-    if (queued > 1)
+    profiler_.registerUserMeasure("onNewObservation.queue_length", queued);
+    if (queued > 5)
     {
         MRPT_LOG_THROTTLE_ERROR(
             1.0, "Dropping observation due to worker threads too busy.");
+        profiler_.registerUserMeasure("onNewObservation.drop_observation", 1);
         return;
     }
     profiler_.enter("delay_onNewObs_to_process");
@@ -494,7 +499,8 @@ void LidarICP::checkForNearbyKFs()
     // Pick the node at an intermediary distance and try to align
     // against it:
     auto it1 = KF_distances.lower_bound(params_.min_dist_to_matching);
-    auto it2 = KF_distances.upper_bound(params_.max_dist_to_matching);
+    auto it2 = KF_distances.upper_bound(std::max(
+        params_.max_dist_to_loop_closure, params_.max_dist_to_matching));
 
     // Store here all the desired checks:
     std::vector<ICP_Input::Ptr>                nearby_checks;
@@ -506,6 +512,13 @@ void LidarICP::checkForNearbyKFs()
         const auto               kf_id               = it->second.first;
         const topological_dist_t kf_topo_d           = it->second.second;
         bool                     edge_already_exists = false;
+        const bool               is_potential_loop_closure =
+            (kf_topo_d >= params_.min_topo_dist_to_consider_loopclosure);
+
+        // Only explore KFs farther than this threshold if they are LCs:
+        if (!is_potential_loop_closure &&
+            kf_eucl_dist > params_.max_dist_to_matching)
+            continue;
 
         // Already sent out for checking?
         const auto pair_ids = std::make_pair(
@@ -554,7 +567,7 @@ void LidarICP::checkForNearbyKFs()
 
             // Is this an extra edge for a nearby KF, or a potential loop
             // closure?
-            if (kf_topo_d < params_.min_topo_dist_to_consider_loopclosure)
+            if (!is_potential_loop_closure)
             {
                 // Regular, nearby KF-to-KF ICP check:
                 d->align_kind = AlignKind::NearbyAlign;
@@ -629,10 +642,42 @@ void LidarICP::doCheckForNonAdjacentKFs(ICP_Input::Ptr d)
 
         // Call ICP:
         ICP_Output icp_out;
+
+        if (d->align_kind != AlignKind::LoopClosure)
         {
+            // Regular case:
             ProfilerEntry tle(profiler_, "doCheckForNonAdjacentKFs.run_icp");
             run_one_icp(*d, icp_out);
         }
+        else
+        {
+            // Loop closure:
+            ProfilerEntry tle(
+                profiler_, "doCheckForNonAdjacentKFs.run_icp_loop_closure");
+
+            // do a small montecarlo sampling and keep the best attempt:
+            const double std_xyz = params_.max_dist_to_loop_closure * 0.1;
+            const double std_rot = mrpt::DEG2RAD(2.0);
+
+            const auto original_guess = d->init_guess_to_wrt_from;
+
+            mrpt::random::CRandomGenerator rnd;
+
+            for (size_t i = 0; i < params_.loop_closure_montecarlo_samples; i++)
+            {
+                d->init_guess_to_wrt_from = original_guess;
+                d->init_guess_to_wrt_from.x += rnd.drawGaussian1D(0, std_xyz);
+                d->init_guess_to_wrt_from.y += rnd.drawGaussian1D(0, std_xyz);
+                d->init_guess_to_wrt_from.z += rnd.drawGaussian1D(0, std_xyz);
+                d->init_guess_to_wrt_from.yaw += rnd.drawGaussian1D(0, std_rot);
+
+                ICP_Output this_icp_out;
+                run_one_icp(*d, this_icp_out);
+                if (this_icp_out.goodness > icp_out.goodness)
+                    icp_out = this_icp_out;
+            }
+        }
+
         const mrpt::poses::CPose3D rel_pose =
             icp_out.found_pose_to_wrt_from.getMeanVal();
         const double icp_goodness = icp_out.goodness;

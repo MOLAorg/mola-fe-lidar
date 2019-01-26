@@ -75,6 +75,8 @@ class LidarICP : public FrontEndBase
         /** Distance range to check for additional SE(3) edges */
         double       min_dist_to_matching{6.0};
         double       max_dist_to_matching{12.0};
+        double       max_dist_to_loop_closure{30.0};
+        unsigned int loop_closure_montecarlo_samples{10};
         unsigned int max_nearby_align_checks{2};
         unsigned int min_topo_dist_to_consider_loopclosure{20};
 
