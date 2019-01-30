@@ -372,6 +372,9 @@ void LidarICP::doProcessNewObservation(CObservation::Ptr& o)
                     state_.last_kf, kf_out.new_kf_id.value(),
                     state_.accum_since_last_kf.asTPose());
 
+                fPose3.noise_model_diag_xyz_ = 0.10;
+                fPose3.noise_model_diag_rot_ = mrpt::DEG2RAD(1.0);
+
                 mola::Factor f = std::move(fPose3);
                 factor_out_fut = slam_backend_->addFactor(f);
 
