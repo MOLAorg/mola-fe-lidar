@@ -99,8 +99,10 @@ class LidarICP : public FrontEndBase
 
     using topological_dist_t = std::size_t;
 
-    struct pointclouds_t
+    struct pointclouds_t : public mrpt::serialization::CSerializable
     {
+        DEFINE_SERIALIZABLE(pointclouds_t)
+       public:
         /** Different "layers" in which a point cloud is decomposed.
          * For example: "edges", "planes", etc.
          */
@@ -164,8 +166,7 @@ class LidarICP : public FrontEndBase
         // for ICP against nearby past KFs:
         struct LocalPoseGraph
         {
-            mrpt::graphs::CNetworkOfPoses3D                graph;
-            std::map<mrpt::graphs::TNodeID, pointclouds_t> pcs;
+            mrpt::graphs::CNetworkOfPoses3D graph;
             /** Pairs of KFs that have been already checked for loop closure */
             std::set<std::pair<id_t, id_t>> checked_KF_pairs;
         };

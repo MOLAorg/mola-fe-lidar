@@ -29,6 +29,7 @@
 #include <mrpt/opengl/stock_objects.h>
 #include <mrpt/poses/CPose3DPDFGaussian.h>
 #include <mrpt/random.h>
+#include <mrpt/serialization/CArchive.h>
 #include <mrpt/system/datetime.h>
 #include <mrpt/system/filesystem.h>
 #include <mrpt/system/string_utils.h>
@@ -36,7 +37,50 @@
 
 using namespace mola;
 
-MRPT_INITIALIZER(do_register){MOLA_REGISTER_MODULE(LidarICP)}
+static const std::string ANNOTATION_NAME_PC_LAYERS = "lidar-pointcloud-layers";
+
+MRPT_INITIALIZER(do_register)
+{
+    // Register MOLA modules:
+    MOLA_REGISTER_MODULE(LidarICP)
+
+    // Register serializable classes:
+    mrpt::rtti::registerClass(CLASS_ID(mola::LidarICP::pointclouds_t));
+}
+
+IMPLEMENTS_SERIALIZABLE(pointclouds_t, CSerializable, mola::LidarICP)
+
+//
+uint8_t LidarICP::pointclouds_t::serializeGetVersion() const { return 0; }
+void    LidarICP::pointclouds_t::serializeTo(
+    mrpt::serialization::CArchive& out) const
+{
+    out.WriteAs<uint32_t>(layers.size());
+    for (const auto& l : layers) out << l.first << l.second;
+}
+void LidarICP::pointclouds_t::serializeFrom(
+    mrpt::serialization::CArchive& in, uint8_t version)
+{
+    switch (version)
+    {
+        case 0:
+        {
+            uint32_t n = in.ReadAs<uint32_t>();
+            layers.clear();
+            for (size_t i = 0; i < n; i++)
+            {
+                std::string name;
+                in >> name;
+                auto obj = in.ReadObject();
+                layers[name] =
+                    mrpt::ptr_cast<mrpt::maps::CPointsMap>::from(obj);
+            }
+        }
+        break;
+        default:
+            MRPT_THROW_UNKNOWN_SERIALIZATION_VERSION(version);
+    };
+}
 
 LidarICP::LidarICP() = default;
 
@@ -202,13 +246,13 @@ void LidarICP::doProcessNewObservation(CObservation::Ptr& o)
         }
 
         // Extract points from observation:
-        pointclouds_t this_obs_points;
-        bool          have_points;
+        auto this_obs_points = pointclouds_t::Create();
+        bool have_points;
         {
             ProfilerEntry tle(
                 profiler_, "doProcessNewObservation.1.obs2pointcloud");
 
-            const auto& pc = this_obs_points.layers["original"] =
+            const auto& pc = this_obs_points->layers["original"] =
                 mrpt::maps::CSimplePointsMap::Create();
 
             have_points = pc->insertObservationPtr(o);
@@ -219,17 +263,17 @@ void LidarICP::doProcessNewObservation(CObservation::Ptr& o)
             ProfilerEntry tle(
                 profiler_, "doProcessNewObservation.2.filter_pointclouds");
 
-            filterPointCloud(this_obs_points);
+            filterPointCloud(*this_obs_points);
 
             // Remove the original, full-res point cloud to save memory:
-            this_obs_points.layers.erase("original");
+            this_obs_points->layers.erase("original");
         }
 
         // Store for next step:
         auto last_obs_tim   = state_.last_obs_tim;
         auto last_points    = state_.last_points;
         state_.last_obs_tim = this_obs_tim;
-        state_.last_points  = this_obs_points;
+        state_.last_points  = *this_obs_points;
 
         if (!have_points)
         {
@@ -269,7 +313,7 @@ void LidarICP::doProcessNewObservation(CObservation::Ptr& o)
                 0, 0);
             MRPT_TODO("do omega_xyz part!");
 
-            icp_in.to_pc   = this_obs_points;
+            icp_in.to_pc   = *this_obs_points;
             icp_in.from_pc = last_points;
             icp_in.from_id = state_.last_kf;
             icp_in.to_id =
@@ -335,6 +379,7 @@ void LidarICP::doProcessNewObservation(CObservation::Ptr& o)
             BackEndBase::ProposeKF_Input kf;
 
             kf.timestamp = this_obs_tim;
+            MRPT_TODO("re-enable this");
             {
                 mrpt::obs::CSensoryFrame& sf = kf.observations.emplace();
                 sf.push_back(o);
@@ -347,18 +392,30 @@ void LidarICP::doProcessNewObservation(CObservation::Ptr& o)
             auto kf_out = kf_out_fut.get();
 
             ASSERT_(kf_out.success);
-            ASSERT_(
-                kf_out.new_kf_id &&
-                kf_out.new_kf_id.value() != mola::INVALID_ID);
+            ASSERT_(kf_out.new_kf_id);
 
+            const mola::id_t new_kf_id = kf_out.new_kf_id.value();
+            ASSERT_(new_kf_id != mola::INVALID_ID);
+
+            // Add point cloud to the KF annotations in the map:
             {
-                std::lock_guard<std::mutex> lck(local_pose_graph_mtx);
+                profiler_.enter("doProcessNewObservation.wait.ent.writelock");
+                worldmodel_->entities_lock_for_write();
+                profiler_.leave("doProcessNewObservation.wait.ent.writelock");
 
-                // Add point cloud to local graph:
-                state_.local_pose_graph.pcs[kf_out.new_kf_id.value()] =
-                    this_obs_points;
+                ProfilerEntry tle(
+                    profiler_,
+                    "doProcessNewObservation.4.writePCsToWorldModel");
+
+                worldmodel_->entity_annotations_by_id(new_kf_id).emplace(
+                    std::piecewise_construct,
+                    std::forward_as_tuple(ANNOTATION_NAME_PC_LAYERS),
+                    std::forward_as_tuple(
+                        this_obs_points, ANNOTATION_NAME_PC_LAYERS));
+
+                worldmodel_->entities_unlock_for_write();
             }
-            MRPT_LOG_INFO_STREAM("New KF: ID=" << *kf_out.new_kf_id);
+            MRPT_LOG_INFO_STREAM("New KF: ID=" << new_kf_id);
 
             // 2) New SE(3) constraint between consecutive Keyframes:
             if (state_.last_kf != mola::INVALID_ID)
@@ -369,7 +426,7 @@ void LidarICP::doProcessNewObservation(CObservation::Ptr& o)
                 // all we need to tell it is the SE(3) constraint, and the
                 // KeyFrame timestamp:
                 mola::FactorRelativePose3 fPose3(
-                    state_.last_kf, kf_out.new_kf_id.value(),
+                    state_.last_kf, new_kf_id,
                     state_.accum_since_last_kf.asTPose());
 
                 fPose3.noise_model_diag_xyz_ = 0.10;
@@ -396,13 +453,13 @@ void LidarICP::doProcessNewObservation(CObservation::Ptr& o)
 
                 MRPT_LOG_DEBUG_STREAM(
                     "New FactorRelativePose3ConstVel: #"
-                    << state_.last_kf << " <=> #" << kf_out.new_kf_id.value()
+                    << state_.last_kf << " <=> #" << new_kf_id
                     << ". rel_pose=" << state_.accum_since_last_kf.asString());
             }
 
             // Reset accumulators:
             state_.accum_since_last_kf = mrpt::poses::CPose3D();
-            state_.last_kf             = kf_out.new_kf_id.value();
+            state_.last_kf             = new_kf_id;
         }  // end done add a new KF
 
         // In any case, publish to the SLAM BackEnd what's our **current**
@@ -410,7 +467,7 @@ void LidarICP::doProcessNewObservation(CObservation::Ptr& o)
         {
             ProfilerEntry tle(
                 profiler_,
-                "doProcessNewObservation.4.advertiseUpdatedLocalization");
+                "doProcessNewObservation.5.advertiseUpdatedLocalization");
 
             BackEndBase::AdvertiseUpdatedLocalization_Input new_loc;
             new_loc.timestamp    = this_obs_tim;
@@ -428,13 +485,13 @@ void LidarICP::doProcessNewObservation(CObservation::Ptr& o)
         {
             std::lock_guard<std::mutex> lck(local_pose_graph_mtx);
             can_check_for_other_matches =
-                (state_.local_pose_graph.pcs.size() > 1);
+                !state_.local_pose_graph.graph.edges.empty();
         }
 
         if (can_check_for_other_matches)
         {
             ProfilerEntry tle(
-                profiler_, "doProcessNewObservation.5.checkForNearbyKFs");
+                profiler_, "doProcessNewObservation.6.checkForNearbyKFs");
             checkForNearbyKFs();
         }
     }
@@ -492,7 +549,6 @@ void LidarICP::checkForNearbyKFs()
             KF_distances.erase(std::prev(KF_distances.end()));
 
             lpg.nodes.erase(id_to_remove);
-            state_.local_pose_graph.pcs.erase(id_to_remove);
             for (const auto other_id : adj[id_to_remove])
             {
                 lpg.edges.erase(std::make_pair(id_to_remove, other_id));
@@ -541,8 +597,12 @@ void LidarICP::checkForNearbyKFs()
         // those two KFs:
         if (!edge_already_exists && worldmodel_)
         {
+            profiler_.enter("checkForNearbyKFs.wait.worldmodel.locks");
+
             worldmodel_->entities_lock_for_read();
             worldmodel_->factors_lock_for_read();
+
+            profiler_.leave("checkForNearbyKFs.wait.worldmodel.locks");
 
             const auto connected = worldmodel_->entity_neighbors(kf_id);
             if (connected.count(current_kf_id) != 0)
@@ -560,15 +620,50 @@ void LidarICP::checkForNearbyKFs()
 
         if (!edge_already_exists)
         {
-            std::lock_guard<std::mutex> lck(local_pose_graph_mtx);
-
+            // Prepare the command to be sent out to the worker thread:
             auto d     = std::make_shared<ICP_Input>();
             d->to_id   = kf_id;
             d->from_id = current_kf_id;
-            d->to_pc   = state_.local_pose_graph.pcs[d->to_id];
-            d->from_pc = state_.local_pose_graph.pcs[d->from_id];
-            d->init_guess_to_wrt_from =
-                state_.local_pose_graph.graph.nodes[kf_id].asTPose();
+
+            // Retrieve the point clouds from the Map (WorldModel).
+            // This will automatically load them from disk if they were swapped
+            // off memory after a long time unused:
+            // d->to_pc   = state_.local_pose_graph.pcs[d->to_id];
+            // d->from_pc = state_.local_pose_graph.pcs[d->from_id];
+            profiler_.enter("checkForNearbyKFs.wait.entities.lockread");
+
+            worldmodel_->entities_lock_for_read();
+
+            profiler_.leave("checkForNearbyKFs.wait.entities.lockread");
+
+            MRPT_TODO(
+                "Make a mola-kernel function to make this cleaner and throw "
+                "sensible exception errors if something fails");
+            {
+                ProfilerEntry tle(
+                    profiler_, "checkForNearbyKFs.readPCsFromWorldModel");
+
+                d->to_pc = *mrpt::ptr_cast<pointclouds_t>::from(
+                    worldmodel_->entity_annotations_by_id(d->to_id)
+                        .at(ANNOTATION_NAME_PC_LAYERS)
+                        .
+                    operator()());
+
+                d->from_pc = *mrpt::ptr_cast<pointclouds_t>::from(
+                    worldmodel_->entity_annotations_by_id(d->from_id)
+                        .at(ANNOTATION_NAME_PC_LAYERS)
+                        .
+                    operator()());
+            }
+
+            worldmodel_->entities_unlock_for_read();
+
+            {
+                std::lock_guard<std::mutex> lck(local_pose_graph_mtx);
+
+                d->init_guess_to_wrt_from =
+                    state_.local_pose_graph.graph.nodes[kf_id].asTPose();
+            }
 
             // Is this an extra edge for a nearby KF, or a potential loop
             // closure?
