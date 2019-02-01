@@ -269,11 +269,15 @@ void LidarICP::doProcessNewObservation(CObservation::Ptr& o)
             this_obs_points->layers.erase("original");
         }
 
+        profiler_.enter("doProcessNewObservation.2b.copy_vars");
+
         // Store for next step:
         auto last_obs_tim   = state_.last_obs_tim;
         auto last_points    = state_.last_points;
         state_.last_obs_tim = this_obs_tim;
-        state_.last_points  = *this_obs_points;
+        state_.last_points  = this_obs_points;
+
+        profiler_.leave("doProcessNewObservation.2b.copy_vars");
 
         if (!have_points)
         {
@@ -287,7 +291,7 @@ void LidarICP::doProcessNewObservation(CObservation::Ptr& o)
         bool create_keyframe = false;
 
         // First time we cannot do ICP since we need at least two pointclouds:
-        if (last_points.layers.empty())
+        if (!last_points || last_points->layers.empty())
         {
             // Skip ICP.
             MRPT_LOG_DEBUG("First pointcloud: skipping ICP.");
@@ -299,6 +303,8 @@ void LidarICP::doProcessNewObservation(CObservation::Ptr& o)
         {
             // Register point clouds using ICP:
             // ------------------------------------
+            profiler_.enter("doProcessNewObservation.2c.prepare_icp_in");
+
             mrpt::poses::CPose3DPDFGaussian initial_guess;
             // Use velocity model for the initial guess:
             double dt = .0;
@@ -313,7 +319,7 @@ void LidarICP::doProcessNewObservation(CObservation::Ptr& o)
                 0, 0);
             MRPT_TODO("do omega_xyz part!");
 
-            icp_in.to_pc   = *this_obs_points;
+            icp_in.to_pc   = this_obs_points;
             icp_in.from_pc = last_points;
             icp_in.from_id = state_.last_kf;
             icp_in.to_id =
@@ -325,6 +331,8 @@ void LidarICP::doProcessNewObservation(CObservation::Ptr& o)
             icp_in.icp_params = state_.last_iter_twist_is_good
                                     ? params_.icp_params_with_vel
                                     : params_.icp_params_without_vel;
+
+            profiler_.leave("doProcessNewObservation.2c.prepare_icp_in");
 
             // Run ICP:
             {
@@ -380,10 +388,13 @@ void LidarICP::doProcessNewObservation(CObservation::Ptr& o)
 
             kf.timestamp = this_obs_tim;
             MRPT_TODO("re-enable this");
+            if (0)
             {
                 mrpt::obs::CSensoryFrame& sf = kf.observations.emplace();
                 sf.push_back(o);
             }
+
+            profiler_.enter("doProcessNewObservation.3a.addKeyFrame");
 
             std::future<BackEndBase::ProposeKF_Output> kf_out_fut;
             kf_out_fut = slam_backend_->addKeyFrame(kf);
@@ -396,6 +407,8 @@ void LidarICP::doProcessNewObservation(CObservation::Ptr& o)
 
             const mola::id_t new_kf_id = kf_out.new_kf_id.value();
             ASSERT_(new_kf_id != mola::INVALID_ID);
+
+            profiler_.leave("doProcessNewObservation.3a.addKeyFrame");
 
             // Add point cloud to the KF annotations in the map:
             {
@@ -643,13 +656,13 @@ void LidarICP::checkForNearbyKFs()
                 ProfilerEntry tle(
                     profiler_, "checkForNearbyKFs.readPCsFromWorldModel");
 
-                d->to_pc = *mrpt::ptr_cast<pointclouds_t>::from(
+                d->to_pc = mrpt::ptr_cast<pointclouds_t>::from(
                     worldmodel_->entity_annotations_by_id(d->to_id)
                         .at(ANNOTATION_NAME_PC_LAYERS)
                         .
                     operator()());
 
-                d->from_pc = *mrpt::ptr_cast<pointclouds_t>::from(
+                d->from_pc = mrpt::ptr_cast<pointclouds_t>::from(
                     worldmodel_->entity_annotations_by_id(d->from_id)
                         .at(ANNOTATION_NAME_PC_LAYERS)
                         .
@@ -852,10 +865,10 @@ void LidarICP::run_one_icp(const ICP_Input& in, ICP_Output& out)
 
         size_t                  largest_pc_count = 1;
         MultiCloudICP::clouds_t pcs_from, pcs_to;
-        for (auto& layer : in.from_pc.layers)
+        for (auto& layer : in.from_pc->layers)
         {
             pcs_from.push_back(layer.second);
-            pcs_to.push_back(in.to_pc.layers.at(layer.first));
+            pcs_to.push_back(in.to_pc->layers.at(layer.first));
 
             mrpt::keep_max(largest_pc_count, layer.second->size());
         }
@@ -915,7 +928,7 @@ void LidarICP::run_one_icp(const ICP_Input& in, ICP_Output& out)
 
     if (gen_debug)
     {
-        const auto num_pc_layers = in.from_pc.layers.size();
+        const auto num_pc_layers = in.from_pc->layers.size();
         debug_dump_icp_file_counter++;
 
         for (unsigned int l = 0; l < num_pc_layers; l++)
@@ -929,9 +942,9 @@ void LidarICP::run_one_icp(const ICP_Input& in, ICP_Output& out)
             // Init:
             mrpt::opengl::COpenGLScene scene;
 
-            auto it_from = in.from_pc.layers.begin();
+            auto it_from = in.from_pc->layers.begin();
             std::advance(it_from, l);
-            auto it_to = in.to_pc.layers.begin();
+            auto it_to = in.to_pc->layers.begin();
             std::advance(it_to, l);
 
             scene.insert(

@@ -123,10 +123,10 @@ void do_scan_align_test()
 
     for (const auto& l : pcs1.layers)
         if (l.first.compare("original") != 0)
-            icp_in.from_pc.layers[l.first] = l.second;
+            icp_in.from_pc->layers[l.first] = l.second;
     for (const auto& l : pcs2.layers)
         if (l.first.compare("original") != 0)
-            icp_in.to_pc.layers[l.first] = l.second;
+            icp_in.to_pc->layers[l.first] = l.second;
 
     mola::LidarICP::ICP_Output icp_out;
     module.setVerbosityLevel(mrpt::system::LVL_DEBUG);

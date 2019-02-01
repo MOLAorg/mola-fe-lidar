@@ -129,7 +129,7 @@ class LidarICP : public FrontEndBase
         AlignKind           align_kind{AlignKind::LidarOdometry};
         id_t                to_id{mola::INVALID_ID};
         id_t                from_id{mola::INVALID_ID};
-        pointclouds_t       to_pc, from_pc;
+        pointclouds_t::Ptr  to_pc, from_pc;
         mrpt::math::TPose3D init_guess_to_wrt_from;
 
         std::vector<MultiCloudICP::Parameters> icp_params;
@@ -155,7 +155,7 @@ class LidarICP : public FrontEndBase
     struct MethodState
     {
         mrpt::Clock::time_point last_obs_tim{};
-        pointclouds_t           last_points{};
+        pointclouds_t::Ptr      last_points{};
         mrpt::math::TTwist3D    last_iter_twist;
         bool                    last_iter_twist_is_good{false};
         id_t                    last_kf{mola::INVALID_ID};
