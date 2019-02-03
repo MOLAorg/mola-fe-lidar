@@ -89,6 +89,10 @@ class LidarICP : public FrontEndBase
         std::vector<MultiCloudICP::Parameters> icp_params_with_vel,
             icp_params_without_vel, icp_params_loopclosure;
 
+        /** Generate render visualization decoration for every N keyframes */
+        int   viz_decor_decimation{5};
+        float viz_decor_pointsize{2.0f};
+
         bool debug_save_lidar_odometry{false};
         bool debug_save_extra_edges{false};
         bool debug_save_loop_closures{false};
@@ -172,6 +176,8 @@ class LidarICP : public FrontEndBase
         };
 
         LocalPoseGraph local_pose_graph;
+
+        int kf_decor_decim_cnt{-1};
     };
 
     MethodState     state_;

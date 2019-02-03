@@ -157,6 +157,9 @@ void LidarICP::initialize(const std::string& cfg_block)
     YAML_LOAD_OPT(params_, min_topo_dist_to_consider_loopclosure, unsigned int);
     YAML_LOAD_OPT(params_, loop_closure_montecarlo_samples, unsigned int);
 
+    YAML_LOAD_OPT(params_, viz_decor_decimation, int);
+    YAML_LOAD_OPT(params_, viz_decor_pointsize, float);
+
     load_icp_set_of_params(
         params_.icp_params_with_vel, cfg, "icp_params_with_vel.");
     load_icp_set_of_params(
@@ -411,6 +414,7 @@ void LidarICP::doProcessNewObservation(CObservation::Ptr& o)
             profiler_.leave("doProcessNewObservation.3a.addKeyFrame");
 
             // Add point cloud to the KF annotations in the map:
+            // Also, add Rendering decorations for the map visualizer:
             {
                 profiler_.enter("doProcessNewObservation.wait.ent.writelock");
                 worldmodel_->entities_lock_for_write();
@@ -425,6 +429,29 @@ void LidarICP::doProcessNewObservation(CObservation::Ptr& o)
                     std::forward_as_tuple(ANNOTATION_NAME_PC_LAYERS),
                     std::forward_as_tuple(
                         this_obs_points, ANNOTATION_NAME_PC_LAYERS));
+
+                MRPT_TODO(
+                    "move this render stuff to its a low-prio worker thread?");
+                if (auto obs_pc =
+                        dynamic_cast<const mrpt::obs::CObservationPointCloud*>(
+                            o.get());
+                    obs_pc != nullptr && obs_pc->pointcloud &&
+                    (state_.kf_decor_decim_cnt < 0 ||
+                     ++state_.kf_decor_decim_cnt >
+                         params_.viz_decor_decimation))
+                {
+                    state_.kf_decor_decim_cnt = 0;
+
+                    auto obs_render = mrpt::opengl::CSetOfObjects::Create();
+                    obs_pc->pointcloud->renderOptions.point_size =
+                        params_.viz_decor_pointsize;
+                    obs_pc->pointcloud->getAs3DObject(obs_render);
+
+                    worldmodel_->entity_annotations_by_id(new_kf_id).emplace(
+                        std::piecewise_construct,
+                        std::forward_as_tuple("render_decoration"),
+                        std::forward_as_tuple(obs_render, "render_decoration"));
+                }
 
                 worldmodel_->entities_unlock_for_write();
             }
@@ -659,14 +686,12 @@ void LidarICP::checkForNearbyKFs()
                 d->to_pc = mrpt::ptr_cast<pointclouds_t>::from(
                     worldmodel_->entity_annotations_by_id(d->to_id)
                         .at(ANNOTATION_NAME_PC_LAYERS)
-                        .
-                    operator()());
+                        .value());
 
                 d->from_pc = mrpt::ptr_cast<pointclouds_t>::from(
                     worldmodel_->entity_annotations_by_id(d->from_id)
                         .at(ANNOTATION_NAME_PC_LAYERS)
-                        .
-                    operator()());
+                        .value());
             }
 
             worldmodel_->entities_unlock_for_read();
