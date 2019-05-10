@@ -102,7 +102,17 @@ void do_scan_align_test()
 
     // Send to ICP all layers except "original":
     mola::LidarOdometry3D::ICP_Input icp_in;
+    icp_in.to_pc   = mola::LidarOdometry3D::pointclouds_t::Create();
+    icp_in.from_pc = mola::LidarOdometry3D::pointclouds_t::Create();
 
+    for (const auto& l : pcs1.layers)
+        if (l.first.compare("original") != 0)
+            icp_in.from_pc->layers[l.first] = l.second;
+    for (const auto& l : pcs2.layers)
+        if (l.first.compare("original") != 0)
+            icp_in.to_pc->layers[l.first] = l.second;
+
+    // Select ICP configuration parameter set:
     switch (arg_icp_params_set.getValue())
     {
         case 0:
@@ -120,13 +130,6 @@ void do_scan_align_test()
         default:
             throw std::invalid_argument("icp-params-set: invalid value.");
     }
-
-    for (const auto& l : pcs1.layers)
-        if (l.first.compare("original") != 0)
-            icp_in.from_pc->layers[l.first] = l.second;
-    for (const auto& l : pcs2.layers)
-        if (l.first.compare("original") != 0)
-            icp_in.to_pc->layers[l.first] = l.second;
 
     mola::LidarOdometry3D::ICP_Output icp_out;
     module.setVerbosityLevel(mrpt::system::LVL_DEBUG);
@@ -176,6 +179,11 @@ void do_scan_align_test()
         }
         win->repaint();
     }
+
+    std::cout << "Align results:\n"
+                 " - found_pose_to_wrt_from:"
+              << icp_out.found_pose_to_wrt_from.asString() << "\n"
+              << " - goodness: " << icp_out.goodness << "\n";
 
     std::cout << "Close windows or hit a key on first window to quit.\n";
     if (!wins.empty()) wins.begin()->second->waitForKey();
