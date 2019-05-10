@@ -4,19 +4,19 @@
  * See LICENSE for license information.
  * ------------------------------------------------------------------------- */
 /**
- * @file   LidarICP.cpp
+ * @file   LidarOdometry3D.cpp
  * @brief  Simple SLAM FrontEnd for point-cloud sensors via ICP registration
  * @author Jose Luis Blanco Claraco
  * @date   Dec 17, 2018
  */
 
-/** \defgroup mola_fe_lidar_icp_grp mola-fe-lidar-icp.
+/** \defgroup mola_fe_lidar_icp_grp mola-fe-lidar-3d.
  * Simple SLAM FrontEnd for point-cloud sensors via ICP registration.
  *
  *
  */
 
-#include <mola-fe-lidar-icp/LidarICP.h>
+#include <mola-fe-lidar-3d/LidarOdometry3D.h>
 #include <mola-kernel/yaml_helpers.h>
 #include <mrpt/config/CConfigFileMemory.h>
 #include <mrpt/core/initializer.h>
@@ -42,23 +42,23 @@ static const std::string ANNOTATION_NAME_PC_LAYERS = "lidar-pointcloud-layers";
 MRPT_INITIALIZER(do_register)
 {
     // Register MOLA modules:
-    MOLA_REGISTER_MODULE(LidarICP)
+    MOLA_REGISTER_MODULE(LidarOdometry3D)
 
     // Register serializable classes:
-    mrpt::rtti::registerClass(CLASS_ID(mola::LidarICP::pointclouds_t));
+    mrpt::rtti::registerClass(CLASS_ID(mola::LidarOdometry3D::pointclouds_t));
 }
 
-IMPLEMENTS_SERIALIZABLE(pointclouds_t, CSerializable, mola::LidarICP)
+IMPLEMENTS_SERIALIZABLE(pointclouds_t, CSerializable, mola::LidarOdometry3D)
 
 //
-uint8_t LidarICP::pointclouds_t::serializeGetVersion() const { return 0; }
-void    LidarICP::pointclouds_t::serializeTo(
+uint8_t LidarOdometry3D::pointclouds_t::serializeGetVersion() const { return 0; }
+void    LidarOdometry3D::pointclouds_t::serializeTo(
     mrpt::serialization::CArchive& out) const
 {
     out.WriteAs<uint32_t>(layers.size());
     for (const auto& l : layers) out << l.first << l.second;
 }
-void LidarICP::pointclouds_t::serializeFrom(
+void LidarOdometry3D::pointclouds_t::serializeFrom(
     mrpt::serialization::CArchive& in, uint8_t version)
 {
     switch (version)
@@ -82,7 +82,7 @@ void LidarICP::pointclouds_t::serializeFrom(
     };
 }
 
-LidarICP::LidarICP() = default;
+LidarOdometry3D::LidarOdometry3D() = default;
 
 static void load_icp_set_of_params(
     std::vector<MultiCloudICP::Parameters>& out, YAML::Node& cfg,
@@ -126,7 +126,7 @@ static void load_icp_set_of_params(
     }
 }
 
-void LidarICP::initialize(const std::string& cfg_block)
+void LidarOdometry3D::initialize(const std::string& cfg_block)
 {
     MRPT_TRY_START
 
@@ -185,7 +185,7 @@ void LidarICP::initialize(const std::string& cfg_block)
 
     MRPT_TRY_END
 }
-void LidarICP::spinOnce()
+void LidarOdometry3D::spinOnce()
 {
     MRPT_TRY_START
 
@@ -195,9 +195,9 @@ void LidarICP::spinOnce()
     MRPT_TRY_END
 }
 
-void LidarICP::reset() { state_ = MethodState(); }
+void LidarOdometry3D::reset() { state_ = MethodState(); }
 
-void LidarICP::onNewObservation(CObservation::Ptr& o)
+void LidarOdometry3D::onNewObservation(CObservation::Ptr& o)
 {
     MRPT_TRY_START
     ProfilerEntry tleg(profiler_, "onNewObservation");
@@ -218,13 +218,13 @@ void LidarICP::onNewObservation(CObservation::Ptr& o)
     profiler_.enter("delay_onNewObs_to_process");
 
     // Enqueue task:
-    worker_pool_.enqueue(&LidarICP::doProcessNewObservation, this, o);
+    worker_pool_.enqueue(&LidarOdometry3D::doProcessNewObservation, this, o);
 
     MRPT_TRY_END
 }
 
 // here happens the main stuff:
-void LidarICP::doProcessNewObservation(CObservation::Ptr& o)
+void LidarOdometry3D::doProcessNewObservation(CObservation::Ptr& o)
 {
     // All methods that are enqueued into a thread pool should have its own
     // top-level try-catch:
@@ -541,7 +541,7 @@ void LidarICP::doProcessNewObservation(CObservation::Ptr& o)
     }
 }
 
-void LidarICP::checkForNearbyKFs()
+void LidarOdometry3D::checkForNearbyKFs()
 {
     using namespace std::string_literals;
 
@@ -737,7 +737,7 @@ void LidarICP::checkForNearbyKFs()
     {
         const auto& d = nearby_checks[idx];
         worker_pool_past_KFs_.enqueue(
-            &LidarICP::doCheckForNonAdjacentKFs, this, d);
+            &LidarOdometry3D::doCheckForNonAdjacentKFs, this, d);
 
         {
             std::lock_guard<std::mutex> lck(local_pose_graph_mtx);
@@ -755,7 +755,7 @@ void LidarICP::checkForNearbyKFs()
         const auto& d = loop_closure_checks.begin()->second;
 
         worker_pool_past_KFs_.enqueue(
-            &LidarICP::doCheckForNonAdjacentKFs, this, d);
+            &LidarOdometry3D::doCheckForNonAdjacentKFs, this, d);
 
         MRPT_LOG_WARN_STREAM(
             "Attempting to close a loop between KFs #" << d->to_id << " <==> #"
@@ -772,7 +772,7 @@ void LidarICP::checkForNearbyKFs()
     MRPT_END
 }
 
-void LidarICP::doCheckForNonAdjacentKFs(ICP_Input::Ptr d)
+void LidarOdometry3D::doCheckForNonAdjacentKFs(ICP_Input::Ptr d)
 {
     try
     {
@@ -877,7 +877,7 @@ void LidarICP::doCheckForNonAdjacentKFs(ICP_Input::Ptr d)
     }
 }
 
-void LidarICP::run_one_icp(const ICP_Input& in, ICP_Output& out)
+void LidarOdometry3D::run_one_icp(const ICP_Input& in, ICP_Output& out)
 {
     using namespace std::string_literals;
 
@@ -1095,7 +1095,7 @@ void LidarICP::run_one_icp(const ICP_Input& in, ICP_Output& out)
     MRPT_END
 }
 
-void LidarICP::filterPointCloud(pointclouds_t& pcs)
+void LidarOdometry3D::filterPointCloud(pointclouds_t& pcs)
 {
     MRPT_START
 

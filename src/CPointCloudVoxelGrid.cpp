@@ -1,6 +1,6 @@
 
 
-#include <mola-fe-lidar-icp/CPointCloudVoxelGrid.h>
+#include <mola-fe-lidar-3d/CPointCloudVoxelGrid.h>
 
 void CPointCloudVoxelGrid::resize(
     const mrpt::math::TPoint3D& min_corner,

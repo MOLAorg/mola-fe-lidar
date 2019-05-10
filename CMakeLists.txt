@@ -8,7 +8,7 @@
 # ------------------------------------------------------------------------------
 
 # Tell CMake we'll use C++ for use in its tests/flags
-project(mola-fe-lidar-icp LANGUAGES CXX)
+project(mola-fe-lidar-3d LANGUAGES CXX)
 
 # -----------------------
 # define lib:
@@ -37,15 +37,15 @@ target_link_libraries(${PROJECT_NAME}
 
 # ----------------------
 # define app target:
-add_executable(test-mola-fe-lidar-icp-segment-scan
-    tests/test-mola-fe-lidar-icp-segment-scan.cpp)
+add_executable(test-mola-fe-lidar-3d-segment-scan
+    tests/test-mola-fe-lidar-3d-segment-scan.cpp)
 
 # Define common flags:
-mola_set_target_build_options(test-mola-fe-lidar-icp-segment-scan)
-mola_configure_app(test-mola-fe-lidar-icp-segment-scan)
+mola_set_target_build_options(test-mola-fe-lidar-3d-segment-scan)
+mola_configure_app(test-mola-fe-lidar-3d-segment-scan)
 
 # Dependencies:
-target_link_libraries(test-mola-fe-lidar-icp-segment-scan
+target_link_libraries(test-mola-fe-lidar-3d-segment-scan
     mrpt::tclap
     mrpt::gui
     yaml-cpp
@@ -54,15 +54,15 @@ target_link_libraries(test-mola-fe-lidar-icp-segment-scan
 
 # ----------------------
 # define app target:
-add_executable(test-mola-fe-lidar-icp-align
-    tests/test-mola-fe-lidar-icp-align.cpp)
+add_executable(test-mola-fe-lidar-3d-align
+    tests/test-mola-fe-lidar-3d-align.cpp)
 
 # Define common flags:
-mola_set_target_build_options(test-mola-fe-lidar-icp-align)
-mola_configure_app(test-mola-fe-lidar-icp-align)
+mola_set_target_build_options(test-mola-fe-lidar-3d-align)
+mola_configure_app(test-mola-fe-lidar-3d-align)
 
 # Dependencies:
-target_link_libraries(test-mola-fe-lidar-icp-align
+target_link_libraries(test-mola-fe-lidar-3d-align
     mrpt::tclap
     mrpt::gui
     yaml-cpp

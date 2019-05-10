@@ -1,9 +1,9 @@
-# mola-fe-lidar-icp
+# mola-fe-lidar-3d
 MOLA module: Front-end for point-cloud sensors based on ICP
 
 
 Provided MOLA modules:
-* `LidarICP`: type `FrontEnd`.
+* `LidarOdometry3D`: type `FrontEnd`.
 
 
 ## Build and install

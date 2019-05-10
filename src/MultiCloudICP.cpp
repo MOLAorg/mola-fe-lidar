@@ -10,8 +10,9 @@
  * @date   Jan 20, 2019
  */
 
-#include <mola-fe-lidar-icp/MultiCloudICP.h>
+#include <mola-fe-lidar-3d/MultiCloudICP.h>
 #include <mrpt/core/exceptions.h>
+#include <mrpt/poses/Lie/SE.h>
 #include <mrpt/tfest/se3.h>
 
 using namespace mola;
@@ -114,9 +115,9 @@ void MultiCloudICP::align(
         solution = mrpt::poses::CPose3D(estPoseQuat);
 
         // If matching has not changed, we are done:
-        const auto                  deltaSol = solution - prev_solution;
-        mrpt::math::CArrayDouble<6> dSol;
-        deltaSol.ln(dSol);
+        const auto                        deltaSol = solution - prev_solution;
+        const mrpt::math::CArrayDouble<6> dSol =
+            mrpt::poses::Lie::SE<3>::log(deltaSol);
         const double delta_xyz = dSol.head<3>().norm();
         const double delta_rot = dSol.tail<3>().norm();
 

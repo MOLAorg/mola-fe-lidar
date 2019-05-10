@@ -5,13 +5,13 @@
  * ------------------------------------------------------------------------- */
 
 /**
- * @file   test-mola-fe-lidar-icp-segment-scan.cpp
+ * @file   test-mola-fe-lidar-3d-segment-scan.cpp
  * @brief  test for 3D lidar scan segmentation
  * @author Jose Luis Blanco Claraco
  * @date   Jan 24, 2019
  */
 
-#include <mola-fe-lidar-icp/LidarICP.h>
+#include <mola-fe-lidar-3d/LidarOdometry3D.h>
 #include <mrpt/core/exceptions.h>
 #include <mrpt/gui/CDisplayWindow3D.h>
 #include <mrpt/maps/CPointsMapXYZI.h>
@@ -24,7 +24,7 @@
 #include <iostream>
 
 // Declare supported cli switches ===========
-static TCLAP::CmdLine cmd("test-mola-fe-lidar-icp-segment-scan");
+static TCLAP::CmdLine cmd("test-mola-fe-lidar-3d-segment-scan");
 
 static TCLAP::ValueArg<std::string> arg_lidar_kitti_file(
     "k", "input-kitti-file", "Load 3D scan from a Kitti lidar (.bin) file",
@@ -52,7 +52,7 @@ void do_scan_segment_test()
     std::cout << "Done. " << pc->size() << " points.\n";
 
     // Filter it:
-    mola::LidarICP module;
+    mola::LidarOdometry3D module;
 
     // Not needed outside of a real SLAM system:
     // module.initialize_common();
@@ -75,7 +75,7 @@ void do_scan_segment_test()
 
     module.initialize(str_params);
 
-    mola::LidarICP::pointclouds_t pcs;
+    mola::LidarOdometry3D::pointclouds_t pcs;
     pcs.layers["original"] = pc;
 
     {

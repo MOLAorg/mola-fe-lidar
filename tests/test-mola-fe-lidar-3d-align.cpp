@@ -5,13 +5,13 @@
  * ------------------------------------------------------------------------- */
 
 /**
- * @file   test-mola-fe-lidar-icp-align.cpp
+ * @file   test-mola-fe-lidar-3d-align.cpp
  * @brief  test for 3D lidar scan alignment
  * @author Jose Luis Blanco Claraco
  * @date   Jan 24, 2019
  */
 
-#include <mola-fe-lidar-icp/LidarICP.h>
+#include <mola-fe-lidar-3d/LidarOdometry3D.h>
 #include <mrpt/core/exceptions.h>
 #include <mrpt/gui/CDisplayWindow3D.h>
 #include <mrpt/maps/CPointsMapXYZI.h>
@@ -24,7 +24,7 @@
 #include <iostream>
 
 // Declare supported cli switches ===========
-static TCLAP::CmdLine cmd("test-mola-fe-lidar-icp-align");
+static TCLAP::CmdLine cmd("test-mola-fe-lidar-3d-align");
 
 static TCLAP::ValueArg<std::string> arg_kitti_file1(
     "", "k1", "Scan1: Load 3D scan from a Kitti lidar (.bin) file", true, "",
@@ -64,7 +64,7 @@ void do_scan_align_test()
     std::cout << "Done. " << pc2->size() << " points.\n";
 
     // Filter:
-    mola::LidarICP module;
+    mola::LidarOdometry3D module;
 
     // Not needed outside of a real SLAM system:
     // module.initialize_common();
@@ -86,14 +86,14 @@ void do_scan_align_test()
 
     module.initialize(str_params);
 
-    mola::LidarICP::pointclouds_t pcs1;
+    mola::LidarOdometry3D::pointclouds_t pcs1;
     pcs1.layers["original"] = pc1;
     {
         mrpt::system::CTimeLoggerEntry tle(timlog, "filterPointCloud");
         module.filterPointCloud(pcs1);
     }
 
-    mola::LidarICP::pointclouds_t pcs2;
+    mola::LidarOdometry3D::pointclouds_t pcs2;
     pcs2.layers["original"] = pc2;
     {
         mrpt::system::CTimeLoggerEntry tle(timlog, "filterPointCloud");
@@ -101,21 +101,21 @@ void do_scan_align_test()
     }
 
     // Send to ICP all layers except "original":
-    mola::LidarICP::ICP_Input icp_in;
+    mola::LidarOdometry3D::ICP_Input icp_in;
 
     switch (arg_icp_params_set.getValue())
     {
         case 0:
             icp_in.icp_params = module.params_.icp_params_with_vel;
-            icp_in.align_kind = mola::LidarICP::AlignKind::LidarOdometry;
+            icp_in.align_kind = mola::LidarOdometry3D::AlignKind::LidarOdometry;
             break;
         case 1:
             icp_in.icp_params = module.params_.icp_params_without_vel;
-            icp_in.align_kind = mola::LidarICP::AlignKind::NearbyAlign;
+            icp_in.align_kind = mola::LidarOdometry3D::AlignKind::NearbyAlign;
             break;
         case 2:
             icp_in.icp_params = module.params_.icp_params_loopclosure;
-            icp_in.align_kind = mola::LidarICP::AlignKind::LoopClosure;
+            icp_in.align_kind = mola::LidarOdometry3D::AlignKind::LoopClosure;
             break;
         default:
             throw std::invalid_argument("icp-params-set: invalid value.");
@@ -128,7 +128,7 @@ void do_scan_align_test()
         if (l.first.compare("original") != 0)
             icp_in.to_pc->layers[l.first] = l.second;
 
-    mola::LidarICP::ICP_Output icp_out;
+    mola::LidarOdometry3D::ICP_Output icp_out;
     module.setVerbosityLevel(mrpt::system::LVL_DEBUG);
     {
         mrpt::system::CTimeLoggerEntry tle(timlog, "run_one_icp");
