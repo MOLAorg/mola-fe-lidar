@@ -88,7 +88,7 @@ void LidarOdometry3D::pointclouds_t::serializeFrom(
 LidarOdometry3D::LidarOdometry3D() = default;
 
 static void load_icp_set_of_params(
-    std::vector<p2p2::MultiCloudICP::Parameters>& out, YAML::Node& cfg,
+    std::vector<p2p2::Parameters>& out, YAML::Node& cfg,
     const std::string& prefix)
 {
     using namespace std::string_literals;
@@ -914,10 +914,10 @@ void LidarOdometry3D::run_one_icp(const ICP_Input& in, ICP_Output& out)
                 "MRPT ICP: max point count=" << largest_pc_count
                                              << " decimation=" << decim);
 
-            p2p2::MultiCloudICP::Parameters icp_params = in.icp_params[stage];
+            p2p2::Parameters icp_params                = in.icp_params[stage];
             icp_params.corresponding_points_decimation = decim;
 
-            p2p2::MultiCloudICP::Results icp_result;
+            p2p2::Results icp_result;
             p2p2::MultiCloudICP::align(
                 pcs_from, pcs_to, current_solution, icp_params, icp_result);
 

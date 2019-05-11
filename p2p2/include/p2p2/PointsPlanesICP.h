@@ -4,32 +4,29 @@
  * See LICENSE for license information.
  * ------------------------------------------------------------------------- */
 /**
- * @file   MultiCloudICP.h
- * @brief  ICP registration for pointclouds split in different "layers"
+ * @file   PointsPlanesICP.h
+ * @brief  ICP registration for points and planes
  * @author Jose Luis Blanco Claraco
- * @date   Jan 20, 2019
+ * @date   May 11, 2019
  */
 #pragma once
 
 #include <mrpt/maps/CPointsMap.h>
-#include <vector>
+#include <cstdint>
 #include "IterTermReason.h"
 #include "Parameters.h"
 #include "Results.h"
 
-/** ICP registration for pointclouds split in different "layers"
+/** ICP registration for points and planes
  *
  * \ingroup mola_fe_lidar_icp_grp */
-namespace p2p2::MultiCloudICP
+namespace p2p2::PointsPlanesICP
 {
-using clouds_t = std::vector<mrpt::maps::CPointsMap::Ptr>;
+using clouds_t = int;  // XXX
 
-/** Compute the displacement (relative pose) between
- *   two maps: the relative pose of pcs2 with respect to pcs1.
- */
 void align(
     const clouds_t& pcs1, const clouds_t& pcs2,
     const mrpt::math::TPose3D& init_guess_m2_wrt_m1, const Parameters& p,
     Results& result);
 
-}  // namespace p2p2::MultiCloudICP
+}  // namespace p2p2::PointsPlanesICP

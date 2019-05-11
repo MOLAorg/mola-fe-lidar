@@ -86,7 +86,7 @@ class LidarOdometry3D : public FrontEndBase
         /** ICP parameters for the case of having, or not, a good velocity model
          * that works a good prior. Each entry in the vector is an "ICP stage",
          * to be run as a sequence of coarser to finer detail */
-        std::vector<p2p2::MultiCloudICP::Parameters> icp_params_with_vel,
+        std::vector<p2p2::Parameters> icp_params_with_vel,
             icp_params_without_vel, icp_params_loopclosure;
 
         /** Generate render visualization decoration for every N keyframes */
@@ -136,7 +136,7 @@ class LidarOdometry3D : public FrontEndBase
         pointclouds_t::Ptr  to_pc, from_pc;
         mrpt::math::TPose3D init_guess_to_wrt_from;
 
-        std::vector<p2p2::MultiCloudICP::Parameters> icp_params;
+        std::vector<p2p2::Parameters> icp_params;
 
         /** used to identity where does this request come from */
         std::string debug_str;
