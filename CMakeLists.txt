@@ -10,62 +10,41 @@
 # Tell CMake we'll use C++ for use in its tests/flags
 project(mola-fe-lidar-3d LANGUAGES CXX)
 
+# find dependencies:
+find_package(MRPT 1.9.9 REQUIRED COMPONENTS slam graphs gui tclap)
+
 # -----------------------
 # define lib:
 file(GLOB_RECURSE LIB_SRCS src/*.cpp src/*.h)
 file(GLOB_RECURSE LIB_PUBLIC_HDRS include/*.h)
 
-add_library(${PROJECT_NAME} SHARED
-    ${LIB_SRCS}
-    ${LIB_PUBLIC_HDRS}
-    )
-
-# Define common flags:
-mola_set_target_build_options(${PROJECT_NAME})
-mola_configure_library(${PROJECT_NAME})
-
-# find dependencies:
-find_package(MRPT 1.9.9 REQUIRED COMPONENTS slam graphs gui tclap)
-
-# Public lib Dependencies:
-target_link_libraries(${PROJECT_NAME}
-  PUBLIC
-    mola-kernel
-    mrpt::graphs
-    mrpt::slam
+mola_add_library(
+	TARGET ${PROJECT_NAME}
+	SOURCES ${LIB_SRCS} ${LIB_PUBLIC_HDRS}
+	PUBLIC_LINK_LIBRARIES
+		mola-kernel
+	    mrpt::graphs
+	    mrpt::slam
 )
 
 # ----------------------
-# define app target:
-add_executable(test-mola-fe-lidar-3d-segment-scan
-    tests/test-mola-fe-lidar-3d-segment-scan.cpp)
-
-# Define common flags:
-mola_set_target_build_options(test-mola-fe-lidar-3d-segment-scan)
-mola_configure_app(test-mola-fe-lidar-3d-segment-scan)
-
-# Dependencies:
-target_link_libraries(test-mola-fe-lidar-3d-segment-scan
-    mrpt::tclap
-    mrpt::gui
-    yaml-cpp
-    ${PROJECT_NAME}
+# define app targets:
+mola_add_executable(
+	TARGET  mola-app-fe-lidar-3d-segment-scan
+	SOURCES apps/mola-app-fe-lidar-3d-segment-scan.cpp
+	LINK_LIBRARIES
+		mrpt::tclap
+		mrpt::gui
+		yaml-cpp
+		${PROJECT_NAME}
 )
 
-# ----------------------
-# define app target:
-add_executable(test-mola-fe-lidar-3d-align
-    tests/test-mola-fe-lidar-3d-align.cpp)
-
-# Define common flags:
-mola_set_target_build_options(test-mola-fe-lidar-3d-align)
-mola_configure_app(test-mola-fe-lidar-3d-align)
-
-# Dependencies:
-target_link_libraries(test-mola-fe-lidar-3d-align
-    mrpt::tclap
-    mrpt::gui
-    yaml-cpp
-    ${PROJECT_NAME}
+mola_add_executable(
+	TARGET  mola-app-fe-lidar-3d-align
+	SOURCES apps/mola-app-fe-lidar-3d-align.cpp
+	LINK_LIBRARIES
+		mrpt::tclap
+		mrpt::gui
+		yaml-cpp
+		${PROJECT_NAME}
 )
-
