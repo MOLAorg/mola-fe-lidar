@@ -16,9 +16,9 @@
 #include <mrpt/graphs/CNetworkOfPoses.h>
 #include <mrpt/maps/CPointsMap.h>
 #include <mrpt/slam/CICP.h>
+#include <p2p2/MultiCloudICP.h>
+#include <p2p2/PointCloudToVoxelGrid.h>
 #include <mutex>
-#include "CPointCloudVoxelGrid.h"
-#include "MultiCloudICP.h"
 
 namespace mola
 {
@@ -86,7 +86,7 @@ class LidarOdometry3D : public FrontEndBase
         /** ICP parameters for the case of having, or not, a good velocity model
          * that works a good prior. Each entry in the vector is an "ICP stage",
          * to be run as a sequence of coarser to finer detail */
-        std::vector<MultiCloudICP::Parameters> icp_params_with_vel,
+        std::vector<p2p2::MultiCloudICP::Parameters> icp_params_with_vel,
             icp_params_without_vel, icp_params_loopclosure;
 
         /** Generate render visualization decoration for every N keyframes */
@@ -136,7 +136,7 @@ class LidarOdometry3D : public FrontEndBase
         pointclouds_t::Ptr  to_pc, from_pc;
         mrpt::math::TPose3D init_guess_to_wrt_from;
 
-        std::vector<MultiCloudICP::Parameters> icp_params;
+        std::vector<p2p2::MultiCloudICP::Parameters> icp_params;
 
         /** used to identity where does this request come from */
         std::string debug_str;
@@ -158,13 +158,13 @@ class LidarOdometry3D : public FrontEndBase
     /** All variables that hold the algorithm state */
     struct MethodState
     {
-        mrpt::Clock::time_point last_obs_tim{};
-        pointclouds_t::Ptr      last_points{};
-        mrpt::math::TTwist3D    last_iter_twist;
-        bool                    last_iter_twist_is_good{false};
-        id_t                    last_kf{mola::INVALID_ID};
-        mrpt::poses::CPose3D    accum_since_last_kf{};
-        CPointCloudVoxelGrid    filter_grid;
+        mrpt::Clock::time_point     last_obs_tim{};
+        pointclouds_t::Ptr          last_points{};
+        mrpt::math::TTwist3D        last_iter_twist;
+        bool                        last_iter_twist_is_good{false};
+        id_t                        last_kf{mola::INVALID_ID};
+        mrpt::poses::CPose3D        accum_since_last_kf{};
+        p2p2::PointCloudToVoxelGrid filter_grid;
 
         // An auxiliary (local) pose-graph to use Dijkstra and find guesses
         // for ICP against nearby past KFs:

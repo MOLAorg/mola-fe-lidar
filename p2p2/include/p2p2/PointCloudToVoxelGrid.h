@@ -10,10 +10,12 @@
 #include <mrpt/maps/CPointsMap.h>
 #include <mrpt/math/lightweight_geom_data.h>
 
-class CPointCloudVoxelGrid
+namespace p2p2
+{
+class PointCloudToVoxelGrid
 {
    public:
-    CPointCloudVoxelGrid() = default;
+    PointCloudToVoxelGrid() = default;
 
     void resize(
         const mrpt::math::TPoint3D& min_corner,
@@ -32,3 +34,5 @@ class CPointCloudVoxelGrid
      * use its iterator, etc. */
     grid_t pts_voxels;
 };
+
+}  // namespace p2p2

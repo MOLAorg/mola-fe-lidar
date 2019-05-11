@@ -10,12 +10,12 @@
  * @date   Jan 20, 2019
  */
 
-#include <mola-fe-lidar-3d/MultiCloudICP.h>
 #include <mrpt/core/exceptions.h>
 #include <mrpt/poses/Lie/SE.h>
 #include <mrpt/tfest/se3.h>
+#include <p2p2/MultiCloudICP.h>
 
-using namespace mola;
+using namespace p2p2;
 
 void MultiCloudICP::align(
     const clouds_t& pcs1, const clouds_t& pcs2,

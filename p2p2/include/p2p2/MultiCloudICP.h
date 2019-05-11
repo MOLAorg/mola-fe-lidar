@@ -19,7 +19,7 @@
 /** ICP registration for pointclouds split in different "layers"
  *
  * \ingroup mola_fe_lidar_icp_grp */
-namespace mola::MultiCloudICP
+namespace p2p2::MultiCloudICP
 {
 /** Reason of iterating termination */
 enum class IterTermReason
@@ -93,4 +93,4 @@ void align(
     const mrpt::math::TPose3D& init_guess_m2_wrt_m1, const Parameters& p,
     Results& result);
 
-}  // namespace mola::MultiCloudICP
+}  // namespace p2p2::MultiCloudICP

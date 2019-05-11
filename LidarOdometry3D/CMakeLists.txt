@@ -7,14 +7,14 @@
 # Released under GNU GPL v3. See LICENSE file
 # ------------------------------------------------------------------------------
 
-# Tell CMake we'll use C++ for use in its tests/flags
-project(mola-fe-lidar-3d LANGUAGES CXX)
+# define MOLA module lib:
+file(GLOB_RECURSE LIB_SRCS src/*.cpp src/*.h)
+file(GLOB_RECURSE LIB_PUBLIC_HDRS include/*.h)
 
-# Include the scan matching P2P2 library:
-add_subdirectory(p2p2)
-
-# MOLA module
-add_subdirectory(LidarOdometry3D)
-
-# MOLA apps:
-add_subdirectory(apps)
+mola_add_library(
+	TARGET ${PROJECT_NAME}
+	SOURCES ${LIB_SRCS} ${LIB_PUBLIC_HDRS}
+	PUBLIC_LINK_LIBRARIES
+		mola-kernel
+		p2p2
+)

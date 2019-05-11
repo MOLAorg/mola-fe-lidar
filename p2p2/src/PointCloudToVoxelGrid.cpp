@@ -1,8 +1,14 @@
+/* -------------------------------------------------------------------------
+ *   A Modular Optimization framework for Localization and mApping  (MOLA)
+ * Copyright (C) 2018-2019 Jose Luis Blanco, University of Almeria
+ * See LICENSE for license information.
+ * ------------------------------------------------------------------------- */
 
+#include <p2p2/PointCloudToVoxelGrid.h>
 
-#include <mola-fe-lidar-3d/CPointCloudVoxelGrid.h>
+using namespace p2p2;
 
-void CPointCloudVoxelGrid::resize(
+void PointCloudToVoxelGrid::resize(
     const mrpt::math::TPoint3D& min_corner,
     const mrpt::math::TPoint3D& max_corner, const float voxel_size)
 {
@@ -12,7 +18,7 @@ void CPointCloudVoxelGrid::resize(
         max_corner.z, voxel_size, voxel_size);
 }
 
-void CPointCloudVoxelGrid::processPointCloud(const mrpt::maps::CPointsMap& p)
+void PointCloudToVoxelGrid::processPointCloud(const mrpt::maps::CPointsMap& p)
 {
     const auto& xs   = p.getPointsBufferRef_x();
     const auto& ys   = p.getPointsBufferRef_y();
@@ -26,7 +32,7 @@ void CPointCloudVoxelGrid::processPointCloud(const mrpt::maps::CPointsMap& p)
     }
 }
 
-void CPointCloudVoxelGrid::clear()
+void PointCloudToVoxelGrid::clear()
 {
     for (auto& c : pts_voxels) c.indices.clear();
 }

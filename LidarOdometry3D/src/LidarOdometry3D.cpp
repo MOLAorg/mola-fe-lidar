@@ -51,8 +51,11 @@ MRPT_INITIALIZER(do_register)
 IMPLEMENTS_SERIALIZABLE(pointclouds_t, CSerializable, mola::LidarOdometry3D)
 
 //
-uint8_t LidarOdometry3D::pointclouds_t::serializeGetVersion() const { return 0; }
-void    LidarOdometry3D::pointclouds_t::serializeTo(
+uint8_t LidarOdometry3D::pointclouds_t::serializeGetVersion() const
+{
+    return 0;
+}
+void LidarOdometry3D::pointclouds_t::serializeTo(
     mrpt::serialization::CArchive& out) const
 {
     out.WriteAs<uint32_t>(layers.size());
@@ -85,7 +88,7 @@ void LidarOdometry3D::pointclouds_t::serializeFrom(
 LidarOdometry3D::LidarOdometry3D() = default;
 
 static void load_icp_set_of_params(
-    std::vector<MultiCloudICP::Parameters>& out, YAML::Node& cfg,
+    std::vector<p2p2::MultiCloudICP::Parameters>& out, YAML::Node& cfg,
     const std::string& prefix)
 {
     using namespace std::string_literals;
@@ -888,8 +891,8 @@ void LidarOdometry3D::run_one_icp(const ICP_Input& in, ICP_Output& out)
 
         ASSERT_(!in.icp_params.empty());
 
-        size_t                  largest_pc_count = 1;
-        MultiCloudICP::clouds_t pcs_from, pcs_to;
+        size_t                        largest_pc_count = 1;
+        p2p2::MultiCloudICP::clouds_t pcs_from, pcs_to;
         for (auto& layer : in.from_pc->layers)
         {
             pcs_from.push_back(layer.second);
@@ -911,11 +914,11 @@ void LidarOdometry3D::run_one_icp(const ICP_Input& in, ICP_Output& out)
                 "MRPT ICP: max point count=" << largest_pc_count
                                              << " decimation=" << decim);
 
-            MultiCloudICP::Parameters icp_params       = in.icp_params[stage];
+            p2p2::MultiCloudICP::Parameters icp_params = in.icp_params[stage];
             icp_params.corresponding_points_decimation = decim;
 
-            MultiCloudICP::Results icp_result;
-            MultiCloudICP::align(
+            p2p2::MultiCloudICP::Results icp_result;
+            p2p2::MultiCloudICP::align(
                 pcs_from, pcs_to, current_solution, icp_params, icp_result);
 
             if (icp_result.goodness > 0)

@@ -8,13 +8,20 @@
 # ------------------------------------------------------------------------------
 
 # Tell CMake we'll use C++ for use in its tests/flags
-project(mola-fe-lidar-3d LANGUAGES CXX)
+project(p2p2 LANGUAGES CXX)
 
-# Include the scan matching P2P2 library:
-add_subdirectory(p2p2)
+# find dependencies:
+find_package(MRPT 1.9.9 REQUIRED COMPONENTS slam)
 
-# MOLA module
-add_subdirectory(LidarOdometry3D)
+# -----------------------
+# define lib:
+file(GLOB_RECURSE LIB_SRCS src/*.cpp src/*.h)
+file(GLOB_RECURSE LIB_PUBLIC_HDRS include/*.h)
 
-# MOLA apps:
-add_subdirectory(apps)
+mola_add_library(
+	TARGET ${PROJECT_NAME}
+	SOURCES ${LIB_SRCS} ${LIB_PUBLIC_HDRS}
+	PUBLIC_LINK_LIBRARIES
+	    mrpt::containers
+	    mrpt::slam
+)
