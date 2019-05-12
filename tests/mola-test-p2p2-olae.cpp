@@ -18,8 +18,9 @@
 #include <mrpt/math/ops_vectors.h>
 #include <mrpt/poses/CPose3D.h>
 #include <mrpt/poses/CPose3DQuat.h>
+#include <mrpt/poses/Lie/SE.h>
 #include <mrpt/random.h>
-#include <mrpt/tfest/se3.h>
+#include <mrpt/system/CTicTac.h>
 
 using namespace mrpt;
 using namespace mrpt::math;
@@ -28,56 +29,47 @@ using namespace mrpt::random;
 using namespace mrpt::poses;
 using namespace std;
 
-using TPoints = std::vector<std::vector<double>>;
+using TPoints = std::vector<mrpt::math::TPoint3D>;
 
 // ------------------------------------------------------
 //				Generate both sets of points
 // ------------------------------------------------------
-CPose3DQuat generate_points(TPoints& pA, TPoints& pB)
+CPose3DQuat generate_points(
+    TPoints& pA, TPoints& pB, const size_t nPts, const double noise_std)
 {
-    const double Dx = 10.1;
-    const double Dy = 15.2;
-    const double Dz = 18.3;
+    auto& rnd = mrpt::random::getRandomGenerator();
 
-    const double yaw   = DEG2RAD(10.);
-    const double pitch = DEG2RAD(0.);
-    const double roll  = DEG2RAD(0.);
+    const double Dx = rnd.drawUniform(-10.0, 10.0);
+    const double Dy = rnd.drawUniform(-10.0, 10.0);
+    const double Dz = rnd.drawUniform(-10.0, 10.0);
 
-    pA.resize(5);  // A set of points at "A" reference system
-    pB.resize(5);  // A set of points at "B" reference system
+    const double yaw   = DEG2RAD(rnd.drawUniform(-180.0, 180.0));
+    const double pitch = DEG2RAD(rnd.drawUniform(-90.0, 90.0));
+    const double roll  = DEG2RAD(rnd.drawUniform(-90.0, 90.0));
 
-    pA[0].resize(3);
-    pA[0][0] = 0.0;
-    pA[0][1] = 0.5;
-    pA[0][2] = 0.4;
-    pA[1].resize(3);
-    pA[1][0] = 1.0;
-    pA[1][1] = 1.5;
-    pA[1][2] = -0.1;
-    pA[2].resize(3);
-    pA[2][0] = 1.2;
-    pA[2][1] = 1.1;
-    pA[2][2] = 0.9;
-    pA[3].resize(3);
-    pA[3][0] = 0.7;
-    pA[3][1] = 0.3;
-    pA[3][2] = 3.4;
-    pA[4].resize(3);
-    pA[4][0] = 1.9;
-    pA[4][1] = 2.5;
-    pA[4][2] = -1.7;
+    const auto qPose = CPose3DQuat(CPose3D(Dx, Dy, Dz, yaw, pitch, roll));
 
-    CPose3DQuat qPose = CPose3DQuat(CPose3D(Dx, Dy, Dz, yaw, pitch, roll));
-    for (unsigned int i = 0; i < 5; ++i)
+    pA.resize(nPts);
+
+    for (size_t i = 0; i < nPts; i++)
     {
-        pB[i].resize(3);
+        pA[i].x = rnd.drawUniform(-10.0, 10.0);
+        pA[i].y = rnd.drawUniform(-10.0, 10.0);
+        pA[i].z = rnd.drawUniform(-10.0, 10.0);
+    }
+
+    pB.resize(nPts);
+    for (unsigned int i = 0; i < nPts; ++i)
+    {
         qPose.inverseComposePoint(
             pA[i][0], pA[i][1], pA[i][2], pB[i][0], pB[i][1], pB[i][2]);
+        pB[i].x += rnd.drawGaussian1D(0, noise_std);
+        pB[i].y += rnd.drawGaussian1D(0, noise_std);
+        pB[i].z += rnd.drawGaussian1D(0, noise_std);
     }
 
     return qPose;
-
-}  // end generate_points
+}
 
 // ------------------------------------------------------
 //				Generate a list of matched points
@@ -86,7 +78,7 @@ void generate_list_of_points(
     const TPoints& pA, const TPoints& pB, TMatchingPairList& list)
 {
     TMatchingPair pair;
-    for (unsigned int i = 0; i < 5; ++i)
+    for (unsigned int i = 0; i < pA.size(); ++i)
     {
         pair.this_idx = pair.other_idx = i;
         pair.this_x                    = pA[i][0];
@@ -99,7 +91,7 @@ void generate_list_of_points(
 
         list.push_back(pair);
     }
-}  // end generate_list_of_points
+}
 
 // ------------------------------------------------------
 //				Genreate a vector of matched points
@@ -118,61 +110,50 @@ void generate_vector_of_points(
     }
 }  // end generate_vector_of_points
 
-int TEST_p2p2_olae_basic()
+bool TEST_p2p2_olae(const size_t numPts, const double noise_std)
 {
     MRPT_START
 
+    std::cout << "[TEST_p2p2_olae] numPts=" << numPts
+              << " noise_std=" << noise_std << "\n";
+
     TPoints           pA, pB;  // The input points
-    const CPose3DQuat qPose   = generate_points(pA, pB);
+    const CPose3DQuat qPose   = generate_points(pA, pB, numPts, noise_std);
     const CPose3D     gt_pose = CPose3D(qPose);
 
     TMatchingPairList list;
     generate_list_of_points(pA, pB, list);  // Generate a list of matched points
 
-    // 1st: test with the classic Horn method (from MRPT)
-    {
-        // Output CPose3DQuat for the LSRigidTransformation
-        CPose3DQuat outQuat;
-        // Output scale value
-        double scale;
-
-        bool res = mrpt::tfest::se3_l2(list, outQuat, scale);
-        ASSERT_EQUAL_(res, true);
-
-        double err = 0.0;
-        if ((qPose[3] * outQuat[3] > 0 && qPose[4] * outQuat[4] > 0 &&
-             qPose[5] * outQuat[5] > 0 && qPose[6] * outQuat[6] > 0) ||
-            (qPose[3] * outQuat[3] < 0 && qPose[4] * outQuat[4] < 0 &&
-             qPose[5] * outQuat[5] < 0 && qPose[6] * outQuat[6] < 0))
-        {
-            for (unsigned int i = 0; i < 7; ++i)
-                err += square(std::fabs(qPose[i]) - std::fabs(outQuat[i]));
-            err = sqrt(err);
-            if (err > 1e-6)
-            {
-                std::stringstream s;
-                s << "Applied quaternion: " << endl
-                  << qPose << endl
-                  << "Out CPose3DQuat: " << endl
-                  << outQuat << " [Err: " << err << "]" << endl;
-                THROW_EXCEPTION(s.str());
-            }
-        }
-    }
-
-    // Now, with the OLEA method:
+    // test with the OLEA method:
     {
         p2p2::PointsPlanesICP::OLAE_Match_Result res;
         p2p2::PointsPlanesICP::OLAE_Match_Input  in;
         in.paired_points = list;
 
-        p2p2::PointsPlanesICP::olae_match(in, res);
+        mrpt::system::CTicTac timer;
+        timer.Tic();
 
-        std::cout << "OLEA output : " << res.optimal_pose.asString() << "\n";
-        std::cout << "Ground truth: " << gt_pose.asString() << "\n";
+        size_t num_reps = 1000;
+        for (size_t rep = 0; rep < num_reps; rep++)
+        {
+            //
+            p2p2::PointsPlanesICP::olae_match(in, res);
+        }
+
+        const double dt = timer.Tac() / num_reps;
+
+        std::cout << "OLEA output       : " << res.optimal_pose.asString()
+                  << "\n";
+        std::cout << "Ground truth      : " << gt_pose.asString() << "\n";
+        std::cout << "OLEA time: " << dt * 1e6
+                  << " microseconds. numPts=" << numPts << "\n";
+
+        const auto pos_error = gt_pose - res.optimal_pose;
+        const auto err_log   = mrpt::poses::Lie::SE<3>::log(pos_error);
+        ASSERT_BELOW_(err_log.norm(), 1e-3 + noise_std);
     }
 
-    return 0;
+    return true;  // all ok.
     MRPT_END
 }
 
@@ -180,7 +161,16 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char** argv)
 {
     try
     {
-        return TEST_p2p2_olae_basic();
+        // Noiseless:
+        ASSERT_(TEST_p2p2_olae(3 /*numPts*/, .0 /* noise*/));
+        ASSERT_(TEST_p2p2_olae(4 /*numPts*/, .0 /* noise*/));
+        ASSERT_(TEST_p2p2_olae(10 /*numPts*/, .0 /* noise*/));
+        ASSERT_(TEST_p2p2_olae(100 /*numPts*/, .0 /* noise*/));
+        ASSERT_(TEST_p2p2_olae(1000 /*numPts*/, .0 /* noise*/));
+
+        // Noisy:
+        ASSERT_(TEST_p2p2_olae(100 /*numPts*/, .1 /* noise*/));
+        ASSERT_(TEST_p2p2_olae(1000 /*numPts*/, .1 /* noise*/));
     }
     catch (std::exception& e)
     {
