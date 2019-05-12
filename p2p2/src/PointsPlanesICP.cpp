@@ -214,6 +214,8 @@ void PointsPlanesICP::olae_match(
         ASSERT_(this_n > 1e-3);
         ASSERT_(other_n > 1e-3);
 
+        MRPT_TODO("**CRITICAL** Fix unit vector != Rodrigues vector!");
+
         dirs_this[i] *= 1.0 / this_n;
         dirs_other[i] *= 1.0 / other_n;
     }
@@ -235,6 +237,9 @@ void PointsPlanesICP::olae_match(
 
     // Terms contributed by points & vectors have now the uniform form of
     // unit vectors:
+    MRPT_TODO("different weights");
+    const double wi = 1.0 / nAllMatches;
+
     for (std::size_t i = 0; i < nAllMatches; i++)
     {
         const auto& bi = dirs_this[i];
@@ -262,15 +267,17 @@ void PointsPlanesICP::olae_match(
         const double c02 = sx * sz;
         const double c12 = sy * sz;
 
-        M(0, 0) += c00;
-        M(1, 1) += c11;
-        M(2, 2) += c22;
-        M(0, 1) += c01;
-        M(1, 0) += c01;
-        M(0, 2) += c02;
-        M(2, 0) += c02;
-        M(1, 2) += c12;
-        M(2, 1) += c12;
+        MRPT_TODO("vectorize");
+
+        M(0, 0) += wi * c00;
+        M(1, 1) += wi * c11;
+        M(2, 2) += wi * c22;
+        M(0, 1) += wi * c01;
+        M(1, 0) += wi * c01;
+        M(0, 2) += wi * c02;
+        M(2, 0) += wi * c02;
+        M(1, 2) += wi * c12;
+        M(2, 1) += wi * c12;
 
         /* v-= [b_i]_{x}  r_i
          *  Each term is:
@@ -280,9 +287,9 @@ void PointsPlanesICP::olae_match(
          *  ⎢              ⎥
          *  ⎣bx⋅ry - by⋅rx ⎦
          */
-        v[0] -= bi.y * ri.z - bi.z * ri.y;
-        v[1] -= -bi.x * ri.z + bi.z * ri.x;
-        v[2] -= bi.x * ri.y - bi.y * ri.x;
+        v[0] -= wi * (bi.y * ri.z - bi.z * ri.y);
+        v[1] -= wi * (-bi.x * ri.z + bi.z * ri.x);
+        v[2] -= wi * (bi.x * ri.y - bi.y * ri.x);
     }
 
     // The missing (1/2) from the formulas above:

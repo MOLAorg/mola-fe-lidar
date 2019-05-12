@@ -7,19 +7,10 @@
 # Released under GNU GPL v3. See LICENSE file
 # ------------------------------------------------------------------------------
 
-# Tell CMake we'll use C++ for use in its tests/flags
-project(mola-fe-lidar-3d LANGUAGES CXX)
-
-# Include the scan matching P2P2 library:
-add_subdirectory(p2p2)
-
-# MOLA module
-add_subdirectory(LidarOdometry3D)
-
-# MOLA apps:
-add_subdirectory(apps)
-
-# Unit tests:
-if(MOLA_ENABLE_UNIT_TESTS)
-	add_subdirectory(tests)
-endif()
+mola_add_executable(
+	TARGET  mola-test-p2p2-olae
+	SOURCES mola-test-p2p2-olae.cpp
+	LINK_LIBRARIES
+		p2p2
+)
+add_test(P2P2_OLAE mola-test-p2p2-olae)
