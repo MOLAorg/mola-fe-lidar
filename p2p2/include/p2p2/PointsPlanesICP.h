@@ -46,10 +46,12 @@ struct matched_planes_t
     plane_patch_t p_this, p_other;
 };
 
+using TMatchedPlanesList = std::vector<matched_planes_t>;
+
 struct OLAE_Match_Input
 {
     mrpt::tfest::TMatchingPairList paired_points;
-    std::vector<matched_planes_t>  paired_planes;
+    TMatchedPlanesList             paired_planes;
 
     bool empty() const
     {

@@ -158,10 +158,12 @@ void PointsPlanesICP::olae_match(
 {
     MRPT_START
 
-    using unit_vec_t = mrpt::math::TPoint3D;
+    using mrpt::math::TPoint3D;
+    using mrpt::math::TVector3D;
 
     // Note on notation: we are search the relative transformation of
-    // the "other" frame wrt to "this", i.e. "this"="global", "other"="local"
+    // the "other" frame wrt to "this", i.e. "this"="global",
+    // "other"="local"
 
     const auto nPts        = in.paired_points.size();
     const auto nPlanes     = in.paired_planes.size();
@@ -173,13 +175,12 @@ void PointsPlanesICP::olae_match(
     // Find centroids:
 
     // Compute the centroids:
-    mrpt::math::TPoint3D ct_other(0, 0, 0), ct_this(0, 0, 0);
+    TPoint3D ct_other(0, 0, 0), ct_this(0, 0, 0);
 
     // Add global coordinate of points for now, we'll convert them later to unit
     // vectors relative to the centroids:
     for (const auto& pair : in.paired_points)
     {
-        using mrpt::math::TPoint3D;
         ct_this += TPoint3D(pair.this_x, pair.this_y, pair.this_z);
         ct_other += TPoint3D(pair.other_x, pair.other_y, pair.other_z);
     }
@@ -207,16 +208,15 @@ void PointsPlanesICP::olae_match(
     for (std::size_t i = 0; i < nAllMatches; i++)
     {
         // Get "bi" (this/global) & "ri" (other/local) vectors:
-        unit_vec_t bi, ri;
+        TVector3D bi, ri;
 
         if (i < nPts)
         {
             // point-to-point pairing:  normalize(point-centroid)
             const auto& p = in.paired_points[i];
 
-            bi = unit_vec_t(p.this_x, p.this_y, p.this_z) - ct_this;
-            ri = unit_vec_t(p.other_x, p.other_y, p.other_z) - ct_other;
-
+            bi = TVector3D(p.this_x, p.this_y, p.this_z) - ct_this;
+            ri = TVector3D(p.other_x, p.other_y, p.other_z) - ct_other;
             const auto bi_n = bi.norm(), ri_n = ri.norm();
             ASSERT_(bi_n > 1e-3);
             ASSERT_(ri_n > 1e-3);
@@ -229,12 +229,11 @@ void PointsPlanesICP::olae_match(
         else
         {
             // plane-to-plane pairing:
-            double n[3];
-            in.paired_planes[i].p_this.plane.getNormalVector(n);
-            bi = unit_vec_t(n[0], n[1], n[2]);
+            bi = in.paired_planes[i].p_this.plane.getNormalVector();
+            ri = in.paired_planes[i].p_other.plane.getNormalVector();
 
-            in.paired_planes[i].p_other.plane.getNormalVector(n);
-            ri = unit_vec_t(n[0], n[1], n[2]);
+            ASSERTDEB_BELOW_(std::abs(bi.norm() - 1.0), 0.01);
+            ASSERTDEB_BELOW_(std::abs(ri.norm() - 1.0), 0.01);
         }
 
         const double wi = wi_all;
@@ -291,7 +290,10 @@ void PointsPlanesICP::olae_match(
 
     // Solve linear system for optimal rotation:
     MRPT_TODO("Sequential rotation method to avoid singularity!");
-    MRPT_TODO("Check det() of M for close-to-ill-defined conditions");
+
+    const double Md = M.det();
+    // std::cout << "|M|=" << Md << "\n";
+    MRPT_TODO("Check det() of M for close-to-ill-defined conditions (<0.05)");
 
     // Find the optimal Gibbs vector:
     const Eigen::Vector3d optimal_rot = M.colPivHouseholderQr().solve(v);
