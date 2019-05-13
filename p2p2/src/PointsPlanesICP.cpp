@@ -242,17 +242,12 @@ static std::tuple<Eigen::Matrix3d, Eigen::Vector3d> olae_build_linear_system(
         const double c02 = sx * sz;
         const double c12 = sy * sz;
 
-        MRPT_TODO("vectorize");
-
-        M(0, 0) += wi * c00;
-        M(1, 1) += wi * c11;
-        M(2, 2) += wi * c22;
-        M(0, 1) += wi * c01;
-        M(1, 0) += wi * c01;
-        M(0, 2) += wi * c02;
-        M(2, 0) += wi * c02;
-        M(1, 2) += wi * c12;
-        M(2, 1) += wi * c12;
+        // clang-format off
+        const auto dM = (Eigen::Matrix3d() <<
+           c00, c01, c02,
+           c01, c11, c12,
+           c02, c12, c22 ).finished();
+        // clang-format on
 
         /* v-= [b_i]_{x}  r_i
          *  Each term is:
@@ -262,9 +257,16 @@ static std::tuple<Eigen::Matrix3d, Eigen::Vector3d> olae_build_linear_system(
          *  ⎢              ⎥
          *  ⎣bx⋅ry - by⋅rx ⎦
          */
-        v[0] += wi * (bi.y * ri.z - bi.z * ri.y);
-        v[1] += wi * (-bi.x * ri.z + bi.z * ri.x);
-        v[2] += wi * (bi.x * ri.y - bi.y * ri.x);
+
+        // clang-format off
+        const auto dV = (Eigen::Vector3d() <<
+           (bi.y * ri.z - bi.z * ri.y),
+           (-bi.x * ri.z + bi.z * ri.x),
+           (bi.x * ri.y - bi.y * ri.x) ).finished();
+        // clang-format on
+
+        M += wi * dM;
+        v -= wi * dV;
     }
 
     // The missing (1/2) from the formulas above:
@@ -293,7 +295,9 @@ void PointsPlanesICP::olae_match(
 
     // Note on notation: we are search the relative transformation of
     // the "other" frame wrt to "this", i.e. "this"="global",
-    // "other"="local"
+    // "other"="local":
+    //   p_this = pose \oplus p_other
+    //   p_A    = pose \oplus p_B      --> pB = p_A \ominus pose
 
     const auto nPts        = in.paired_points.size();
     const auto nPlanes     = in.paired_planes.size();
@@ -339,10 +343,12 @@ void PointsPlanesICP::olae_match(
     // Estimate |Phi|:
     const double estPhi1 = olae_estimate_Phi(Md, nAllMatches);
 
-    std::cout << "|M|=" << Md << " estimated |Phi|=" << mrpt::RAD2DEG(estPhi1)
-              << "\n";
+    // std::cout << "|M|=" << Md << " estimated |Phi|=" <<
+    // mrpt::RAD2DEG(estPhi1)<< "\n";
+
     // Any threshold [90-180] degrees would work.
-    if (estPhi1 > mrpt::DEG2RAD(160.0))
+    MRPT_TODO("Re-enable this!");
+    if (false && estPhi1 > mrpt::DEG2RAD(175.0))
     {
         // relinearize on +180 degrees:
         const auto [M2, v2] = olae_build_linear_system(
@@ -373,7 +379,7 @@ void PointsPlanesICP::olae_match(
         x *= r;
         y *= r;
         z *= r;
-        auto q = mrpt::math::CQuaternionDouble(r, x, y, z);
+        auto q = mrpt::math::CQuaternionDouble(r, -x, -y, -z);
 
         // Quaternion to 3x3 rot matrix:
         result.optimal_pose = mrpt::poses::CPose3D(q, .0, .0, .0);

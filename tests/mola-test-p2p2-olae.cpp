@@ -81,13 +81,14 @@ mrpt::poses::CPose3D transform_points_planes(
 {
     auto& rnd = mrpt::random::getRandomGenerator();
 
-    const double Dx = rnd.drawUniform(-10.0, 10.0);
-    const double Dy = rnd.drawUniform(-10.0, 10.0);
-    const double Dz = rnd.drawUniform(-10.0, 10.0);
+    const double Dx = 1;  // rnd.drawUniform(-10.0, 10.0);
+    const double Dy = 2;  // rnd.drawUniform(-10.0, 10.0);
+    const double Dz = 3;  // rnd.drawUniform(-10.0, 10.0);
 
-    const double yaw   = DEG2RAD(rnd.drawUniform(-180.0, 180.0));
-    const double pitch = DEG2RAD(rnd.drawUniform(-90.0, 90.0));
-    const double roll  = DEG2RAD(rnd.drawUniform(-90.0, 90.0));
+    const double yaw =
+        DEG2RAD(20.0);  // DEG2RAD(rnd.drawUniform(-180.0, 180.0));
+    const double pitch = .0;  // DEG2RAD(rnd.drawUniform(-90.0, 90.0));
+    const double roll  = .0;  // DEG2RAD(rnd.drawUniform(-90.0, 90.0));
 
     const auto pose = CPose3D(Dx, Dy, Dz, yaw, pitch, roll);
     // just the rotation, to transform vectors (vs. R^3 points):
@@ -122,22 +123,22 @@ mrpt::poses::CPose3D transform_points_planes(
     for (std::size_t i = 0; i < plA.size(); ++i)
     {
         // Transform + noise:
-        pose.inverseComposePoint(plA[i].centroid, plB[i].centroid);
-        plB[i].plane = plA[i].plane;
+        plB[i].centroid = pose.inverseComposePoint(plA[i].centroid);
+        plB[i].plane    = plA[i].plane;
 
         // Rotate a plane:
         {
-            const mrpt::math::TVector3D ul = plB[i].plane.getNormalVector();
-            mrpt::math::TVector3D       ug;
-            pose_rot_only.inverseComposePoint(ul, ug);
+            const mrpt::math::TVector3D ug = plA[i].plane.getNormalVector();
+            mrpt::math::TVector3D       ul;
+            pose_rot_only.inverseComposePoint(ug, ul);
 
             // Ax+By+Cz+D=0
-            plB[i].plane.coefs[0] = ug.x;
-            plB[i].plane.coefs[1] = ug.y;
-            plB[i].plane.coefs[2] = ug.z;
+            plB[i].plane.coefs[0] = ul.x;
+            plB[i].plane.coefs[1] = ul.y;
+            plB[i].plane.coefs[2] = ul.z;
             plB[i].plane.coefs[3] =
-                -(ug.x * plB[i].centroid.x + ug.y * plB[i].centroid.y +
-                  ug.z * plB[i].centroid.z);
+                -(ul.x * plB[i].centroid.x + ul.y * plB[i].centroid.y +
+                  ul.z * plB[i].centroid.z);
         }
 
         // noise:
@@ -145,10 +146,10 @@ mrpt::poses::CPose3D transform_points_planes(
         plB[i].centroid.y += rnd.drawGaussian1D(0, xyz_noise_std);
         plB[i].centroid.z += rnd.drawGaussian1D(0, xyz_noise_std);
 
-        plB[i].plane.unitarize();
         for (int k = 0; k < 3; k++)
             plB[i].plane.coefs[k] +=
                 rnd.drawGaussian1D(0, plane_normal_noise_std);
+        plB[i].plane.unitarize();
 
         // Add pairing:
         p2p2::PointsPlanesICP::matched_planes_t pair;
@@ -195,7 +196,7 @@ bool TEST_p2p2_olae(
         mrpt::system::CTicTac timer;
         timer.Tic();
 
-        size_t num_reps = 1;  // 1000
+        size_t num_reps = 1000;
         for (size_t rep = 0; rep < num_reps; rep++)
         {
             //
@@ -204,15 +205,17 @@ bool TEST_p2p2_olae(
 
         const double dt = timer.Tac() / num_reps;
 
+        const auto pos_error = gt_pose - res.optimal_pose;
+        const auto err_log   = mrpt::poses::Lie::SE<3>::log(pos_error);
+
         std::cout << " - Ground_truth      : " << gt_pose.asString() << "\n";
         std::cout << " - OLEA_output       : " << res.optimal_pose.asString()
-                  << "\n";
+                  << " Err: " << err_log.norm() << "\n";
         std::cout << " - OLEA_time: " << dt * 1e6
                   << " microseconds. numPts=" << numPts << "\n";
 
-        const auto pos_error = gt_pose - res.optimal_pose;
-        const auto err_log   = mrpt::poses::Lie::SE<3>::log(pos_error);
-        ASSERT_BELOW_(err_log.norm(), 1e-3 + xyz_noise_std + normals_noise_std);
+        ASSERT_BELOW_(
+            err_log.norm(), 1e-3 + xyz_noise_std + 20 * normals_noise_std);
     }
 
     return true;  // all ok.
@@ -240,9 +243,15 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char** argv)
         ASSERT_(TEST_p2p2_olae(0 /*nPts*/, 100 /*nPlanes*/));
 
         // Planes only. Noisy:
-        ASSERT_(TEST_p2p2_olae(0 /*nPts*/, 3 /*nPlanes*/, 0, 0.02));
-        ASSERT_(TEST_p2p2_olae(0 /*nPts*/, 10 /*nPlanes*/, 0, 0.02));
-        ASSERT_(TEST_p2p2_olae(0 /*nPts*/, 100 /*nPlanes*/, 0, 0.02));
+        const double nN = mrpt::DEG2RAD(0.1);
+        ASSERT_(TEST_p2p2_olae(0 /*nPts*/, 3 /*nPlanes*/, 0, nN));
+        ASSERT_(TEST_p2p2_olae(0 /*nPts*/, 10 /*nPlanes*/, 0, nN));
+        ASSERT_(TEST_p2p2_olae(0 /*nPts*/, 100 /*nPlanes*/, 0, nN));
+
+        // Points and planes, noisy.
+        ASSERT_(TEST_p2p2_olae(5 /*nPts*/, 3 /*nPlanes*/, .1, nN));
+        ASSERT_(TEST_p2p2_olae(20 /*nPts*/, 10 /*nPlanes*/, .1, nN));
+        ASSERT_(TEST_p2p2_olae(400 /*nPts*/, 100 /*nPlanes*/, .1, nN));
     }
     catch (std::exception& e)
     {
