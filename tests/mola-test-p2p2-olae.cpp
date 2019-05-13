@@ -204,10 +204,10 @@ bool TEST_p2p2_olae(
 
         const double dt = timer.Tac() / num_reps;
 
-        std::cout << "OLEA output       : " << res.optimal_pose.asString()
+        std::cout << " - Ground_truth      : " << gt_pose.asString() << "\n";
+        std::cout << " - OLEA_output       : " << res.optimal_pose.asString()
                   << "\n";
-        std::cout << "Ground truth      : " << gt_pose.asString() << "\n";
-        std::cout << "OLEA time: " << dt * 1e6
+        std::cout << " - OLEA_time: " << dt * 1e6
                   << " microseconds. numPts=" << numPts << "\n";
 
         const auto pos_error = gt_pose - res.optimal_pose;

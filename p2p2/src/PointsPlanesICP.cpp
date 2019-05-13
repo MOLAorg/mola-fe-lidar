@@ -152,53 +152,27 @@ void PointsPlanesICP::align(
     MRPT_END
 }
 
-// See .h docs, and associated technical report.
-void PointsPlanesICP::olae_match(
-    const OLAE_Match_Input& in, OLAE_Match_Result& result)
+// Core of the OLAE algorithm.
+// Factored out here so it can be re-evaluated if the solution is near the Gibbs
+// vector singularity (|Phi|~= \pi)
+// (Refer to technical report for details)
+static std::tuple<Eigen::Matrix3d, Eigen::Vector3d> olae_build_linear_system(
+    const PointsPlanesICP::OLAE_Match_Input& in,
+    const mrpt::math::TPoint3D& ct_other, const mrpt::math::TPoint3D& ct_this,
+    const bool do_relinearize_singularity)
 {
     MRPT_START
 
     using mrpt::math::TPoint3D;
     using mrpt::math::TVector3D;
 
-    // Note on notation: we are search the relative transformation of
-    // the "other" frame wrt to "this", i.e. "this"="global",
-    // "other"="local"
+    // Build the linear system: M g = v
+    Eigen::Matrix3d M = Eigen::Matrix3d::Zero();
+    Eigen::Vector3d v = Eigen::Vector3d::Zero();
 
     const auto nPts        = in.paired_points.size();
     const auto nPlanes     = in.paired_planes.size();
     const auto nAllMatches = nPts + nPlanes;
-
-    // Reset output to defaults:
-    result = OLAE_Match_Result();
-
-    // Find centroids:
-
-    // Compute the centroids:
-    TPoint3D ct_other(0, 0, 0), ct_this(0, 0, 0);
-
-    // Add global coordinate of points for now, we'll convert them later to unit
-    // vectors relative to the centroids:
-    for (const auto& pair : in.paired_points)
-    {
-        ct_this += TPoint3D(pair.this_x, pair.this_y, pair.this_z);
-        ct_other += TPoint3D(pair.other_x, pair.other_y, pair.other_z);
-    }
-    // Add plane centroids to the computation of centroids as well:
-    for (const auto& pair : in.paired_planes)
-    {
-        ct_this += pair.p_this.centroid;
-        ct_other += pair.p_other.centroid;
-    }
-
-    // Normalize sum of centroids:
-    const double F = 1.0 / nAllMatches;
-    ct_other *= F;
-    ct_this *= F;
-
-    // Build the linear system: M g = v
-    Eigen::Matrix3d M = Eigen::Matrix3d::Zero();
-    Eigen::Vector3d v = Eigen::Vector3d::Zero();
 
     // Terms contributed by points & vectors have now the uniform form of
     // unit vectors:
@@ -234,6 +208,14 @@ void PointsPlanesICP::olae_match(
 
             ASSERTDEB_BELOW_(std::abs(bi.norm() - 1.0), 0.01);
             ASSERTDEB_BELOW_(std::abs(ri.norm() - 1.0), 0.01);
+        }
+
+        // If we are in a second stage, let's relinearize around +PI, to avoid
+        // working near the Gibbs vector singularity:
+        if (do_relinearize_singularity)
+        {
+            // 180 deg change:
+            ri = -ri;
         }
 
         const double wi = wi_all;
@@ -288,15 +270,101 @@ void PointsPlanesICP::olae_match(
     // The missing (1/2) from the formulas above:
     M *= 0.5;
 
+    return {M, v};
+    //
+    MRPT_END
+}
+
+// "Markley, F. L., & Mortari, D. (1999). How to estimate attitude from
+// vector observations."
+static double olae_estimate_Phi(const double M_det, std::size_t n)
+{
+    return std::acos((M_det / (n == 2 ? -1.0 : -1.178)) - 1.);
+}
+
+// See .h docs, and associated technical report.
+void PointsPlanesICP::olae_match(
+    const OLAE_Match_Input& in, OLAE_Match_Result& result)
+{
+    MRPT_START
+
+    using mrpt::math::TPoint3D;
+    using mrpt::math::TVector3D;
+
+    // Note on notation: we are search the relative transformation of
+    // the "other" frame wrt to "this", i.e. "this"="global",
+    // "other"="local"
+
+    const auto nPts        = in.paired_points.size();
+    const auto nPlanes     = in.paired_planes.size();
+    const auto nAllMatches = nPts + nPlanes;
+
+    // Reset output to defaults:
+    result = OLAE_Match_Result();
+
+    // Find centroids:
+
+    // Compute the centroids:
+    TPoint3D ct_other(0, 0, 0), ct_this(0, 0, 0);
+
+    // Add global coordinate of points for now, we'll convert them later to unit
+    // vectors relative to the centroids:
+    for (const auto& pair : in.paired_points)
+    {
+        ct_this += TPoint3D(pair.this_x, pair.this_y, pair.this_z);
+        ct_other += TPoint3D(pair.other_x, pair.other_y, pair.other_z);
+    }
+    // Add plane centroids to the computation of centroids as well:
+    for (const auto& pair : in.paired_planes)
+    {
+        ct_this += pair.p_this.centroid;
+        ct_other += pair.p_other.centroid;
+    }
+
+    // Normalize sum of centroids:
+    const double F = 1.0 / nAllMatches;
+    ct_other *= F;
+    ct_this *= F;
+
+    // Build the linear system: M g = v
+    const auto [M, v] = olae_build_linear_system(
+        in, ct_other, ct_this, false /*dont relinearize singularity*/);
+
+    // We are finding this optimal rotation, as a Gibbs vector:
+    Eigen::Vector3d optimal_rot;
+
     // Solve linear system for optimal rotation:
-    MRPT_TODO("Sequential rotation method to avoid singularity!");
-
     const double Md = M.det();
-    // std::cout << "|M|=" << Md << "\n";
-    MRPT_TODO("Check det() of M for close-to-ill-defined conditions (<0.05)");
 
-    // Find the optimal Gibbs vector:
-    const Eigen::Vector3d optimal_rot = M.colPivHouseholderQr().solve(v);
+    // Estimate |Phi|:
+    const double estPhi1 = olae_estimate_Phi(Md, nAllMatches);
+
+    std::cout << "|M|=" << Md << " estimated |Phi|=" << mrpt::RAD2DEG(estPhi1)
+              << "\n";
+    // Any threshold [90-180] degrees would work.
+    if (estPhi1 > mrpt::DEG2RAD(160.0))
+    {
+        // relinearize on +180 degrees:
+        const auto [M2, v2] = olae_build_linear_system(
+            in, ct_other, ct_this, true /*DO relinearize singularity*/);
+
+        const double M2d     = M2.det();
+        const double estPhi2 = olae_estimate_Phi(M2d, nAllMatches);
+
+        std::cout << "|M2|=" << M2d
+                  << " estimated |Phi2|=" << mrpt::RAD2DEG(estPhi2) << "\n";
+
+        // Find the optimal Gibbs vector:
+        optimal_rot = M2.colPivHouseholderQr().solve(v2);
+
+        // Undo the 180 deg rotation:
+        optimal_rot = -optimal_rot;
+    }
+    else
+    {
+        // Find the optimal Gibbs vector:
+        optimal_rot = M.colPivHouseholderQr().solve(v);
+    }
 
     // Convert to quaternion by normalizing q=[1, optim_rot]:
     {
