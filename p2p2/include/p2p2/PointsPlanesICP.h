@@ -52,6 +52,11 @@ struct OLAE_Match_Input
 {
     mrpt::tfest::TMatchingPairList paired_points;
     TMatchedPlanesList             paired_planes;
+    /** Relative weight of points and planes. They will be automatically
+     * normalized to sum the unity. Weights are used in two steps: in the
+     * orientation cost function, and in the evaluation of the centroids.
+     */
+    double weight_points{0.5}, weight_planes{0.5};
 
     bool empty() const
     {

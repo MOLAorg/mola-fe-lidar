@@ -152,6 +152,37 @@ void PointsPlanesICP::align(
     MRPT_END
 }
 
+static auto vector_rot_Z_90d_CCW(const mrpt::math::TVector3D& v)
+{
+    return mrpt::math::TVector3D(-v.y, v.x, v.z);
+}
+
+/// Gibbs rotation composition with a 90 degrees CCW rotation
+template <typename VEC3>
+VEC3 gibbs_rot_Z_90d_CCW(const VEC3& v)
+{
+    // Gibbs rotation:
+    // g \oplus f = (g+f- g \times f)/( 1- g \dot f)
+    //
+    // For the case of f=[0;0;1] * tan(90/2) =[0;0;1] (90 deg, +Z):
+    //
+    ASSERT_ABOVE_(std::abs(v[2]), 1e-3);
+
+    return VEC3(v[0] - v[1], v[1] + v[0], v[2] + 1.) * (1. / (1. - v[2]));
+}
+
+/// Gibbs rotation composition with a 90 degrees CW rotation
+template <typename VEC3>
+VEC3 gibbs_rot_Z_90d_CW(const VEC3& v)
+{
+    // Gibbs rotation:
+    // g \oplus f = (g+f- g \times f)/( 1- g \dot f)
+    //
+    // For the case of f=[0;0;1] * tan(-90/2) =[0;0;-1] (90 deg, +Z):
+
+    return VEC3(v[0] + v[1], v[1] - v[0], v[2] + 1.) * (1. / (1. + v[2]));
+}
+
 // Core of the OLAE algorithm.
 // Factored out here so it can be re-evaluated if the solution is near the Gibbs
 // vector singularity (|Phi|~= \pi)
@@ -202,20 +233,21 @@ static std::tuple<Eigen::Matrix3d, Eigen::Vector3d> olae_build_linear_system(
         }
         else
         {
+            const auto idxPlane = i - nPts;
             // plane-to-plane pairing:
-            bi = in.paired_planes[i].p_this.plane.getNormalVector();
-            ri = in.paired_planes[i].p_other.plane.getNormalVector();
+            bi = in.paired_planes[idxPlane].p_this.plane.getNormalVector();
+            ri = in.paired_planes[idxPlane].p_other.plane.getNormalVector();
 
             ASSERTDEB_BELOW_(std::abs(bi.norm() - 1.0), 0.01);
             ASSERTDEB_BELOW_(std::abs(ri.norm() - 1.0), 0.01);
         }
 
-        // If we are in a second stage, let's relinearize around +PI, to avoid
-        // working near the Gibbs vector singularity:
+        // If we are in a second stage, let's relinearize around a rotation of
+        // +PI/2 along +Z, to avoid working near the Gibbs vector singularity:
         if (do_relinearize_singularity)
         {
-            // 180 deg change:
-            ri = -ri;
+            // Rotate:
+            ri = vector_rot_Z_90d_CCW(ri);
         }
 
         const double wi = wi_all;
@@ -306,6 +338,20 @@ void PointsPlanesICP::olae_match(
     // Reset output to defaults:
     result = OLAE_Match_Result();
 
+    ASSERT_(in.weight_points >= .0);
+    ASSERT_(in.weight_planes >= .0);
+
+    double wPoints, wPlanes;
+    {
+        const auto wPt = in.weight_points, wPl = in.weight_planes;
+
+        const double wSum = wPt + wPl;
+        ASSERTMSG_(wSum > .0, "Both, point and plane weights, are <=0 (!)");
+
+        wPoints = wPt / (wPt * nPts + wPl * nPlanes);
+        wPlanes = wPl / (wPt * nPts + wPl * nPlanes);
+    }
+
     // Find centroids:
 
     // Compute the centroids:
@@ -313,24 +359,34 @@ void PointsPlanesICP::olae_match(
 
     // Add global coordinate of points for now, we'll convert them later to unit
     // vectors relative to the centroids:
-    for (const auto& pair : in.paired_points)
     {
-        ct_this += TPoint3D(pair.this_x, pair.this_y, pair.this_z);
-        ct_other += TPoint3D(pair.other_x, pair.other_y, pair.other_z);
-    }
-    // Add plane centroids to the computation of centroids as well:
-    for (const auto& pair : in.paired_planes)
-    {
-        ct_this += pair.p_this.centroid;
-        ct_other += pair.p_other.centroid;
-    }
+        TPoint3D ct_other_pt(0, 0, 0), ct_this_pt(0, 0, 0);
 
-    // Normalize sum of centroids:
-    const double F = 1.0 / nAllMatches;
-    ct_other *= F;
-    ct_this *= F;
+        for (const auto& pair : in.paired_points)
+        {
+            ct_this_pt += TPoint3D(pair.this_x, pair.this_y, pair.this_z);
+            ct_other_pt += TPoint3D(pair.other_x, pair.other_y, pair.other_z);
+        }
+        ct_other_pt *= wPoints;
+        ct_this_pt *= wPoints;
+
+        // Add plane centroids to the computation of centroids as well:
+        TPoint3D ct_other_pl(0, 0, 0), ct_this_pl(0, 0, 0);
+        for (const auto& pair : in.paired_planes)
+        {
+            ct_this_pl += pair.p_this.centroid;
+            ct_other_pl += pair.p_other.centroid;
+        }
+        ct_this_pl *= wPlanes;
+        ct_other_pl *= wPlanes;
+
+        // Normalize sum of centroids:
+        ct_other = ct_other_pt + ct_other_pl;
+        ct_this  = ct_this_pt + ct_this_pl;
+    }
 
     // Build the linear system: M g = v
+    MRPT_TODO("Pass weights! wPoints,...");
     const auto [M, v] = olae_build_linear_system(
         in, ct_other, ct_this, false /*dont relinearize singularity*/);
 
@@ -343,28 +399,29 @@ void PointsPlanesICP::olae_match(
     // Estimate |Phi|:
     const double estPhi1 = olae_estimate_Phi(Md, nAllMatches);
 
-    // std::cout << "|M|=" << Md << " estimated |Phi|=" <<
-    // mrpt::RAD2DEG(estPhi1)<< "\n";
-
     // Any threshold [90-180] degrees would work.
-    MRPT_TODO("Re-enable this!");
-    if (false && estPhi1 > mrpt::DEG2RAD(175.0))
+    const bool do_relinearize = (estPhi1 > mrpt::DEG2RAD(178.0));
+
+    if (do_relinearize)
     {
+        // std::cout << "|M|=" << Md << " estimated |Phi|=" <<
+        // mrpt::RAD2DEG(estPhi1) << "\n";
+
         // relinearize on +180 degrees:
         const auto [M2, v2] = olae_build_linear_system(
             in, ct_other, ct_this, true /*DO relinearize singularity*/);
 
-        const double M2d     = M2.det();
-        const double estPhi2 = olae_estimate_Phi(M2d, nAllMatches);
+        // const double M2d     = M2.det();
+        // const double estPhi2 = olae_estimate_Phi(M2d, nAllMatches);
 
-        std::cout << "|M2|=" << M2d
-                  << " estimated |Phi2|=" << mrpt::RAD2DEG(estPhi2) << "\n";
+        // std::cout << "|M2|=" << M2d << " estimated |Phi2|=" <<
+        // mrpt::RAD2DEG(estPhi2) << "\n";
 
         // Find the optimal Gibbs vector:
         optimal_rot = M2.colPivHouseholderQr().solve(v2);
 
-        // Undo the 180 deg rotation:
-        optimal_rot = -optimal_rot;
+        // Undo the sequential rotation above:
+        optimal_rot = gibbs_rot_Z_90d_CCW(optimal_rot);
     }
     else
     {
@@ -383,6 +440,13 @@ void PointsPlanesICP::olae_match(
 
         // Quaternion to 3x3 rot matrix:
         result.optimal_pose = mrpt::poses::CPose3D(q, .0, .0, .0);
+    }
+    // Undo transformation above:
+    if (do_relinearize)
+    {
+        result.optimal_pose = mrpt::poses::CPose3D(
+            0, 0, 0, M_PI + result.optimal_pose.yaw(),
+            -result.optimal_pose.pitch(), -result.optimal_pose.roll());
     }
 
     // Use centroids to solve for optimal translation:
