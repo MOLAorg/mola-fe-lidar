@@ -22,13 +22,13 @@
  * \ingroup mola_fe_lidar_icp_grp */
 namespace p2p2::MultiCloudICP
 {
-using clouds_t = std::vector<mrpt::maps::CPointsMap::Ptr>;
+using pointcloud_t = std::vector<mrpt::maps::CPointsMap::Ptr>;
 
 /** Compute the displacement (relative pose) between
  *   two maps: the relative pose of pcs2 with respect to pcs1.
  */
 void align(
-    const clouds_t& pcs1, const clouds_t& pcs2,
+    const pointcloud_t& pcs1, const pointcloud_t& pcs2,
     const mrpt::math::TPose3D& init_guess_m2_wrt_m1, const Parameters& p,
     Results& result);
 

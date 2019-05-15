@@ -86,30 +86,30 @@ void do_scan_align_test()
 
     module.initialize(str_params);
 
-    mola::LidarOdometry3D::pointclouds_t pcs1;
-    pcs1.layers["original"] = pc1;
+    mola::LidarOdometry3D::lidar_scan_t pcs1;
+    pcs1.layers["raw"] = pc1;
     {
         mrpt::system::CTimeLoggerEntry tle(timlog, "filterPointCloud");
         module.filterPointCloud(pcs1);
     }
 
-    mola::LidarOdometry3D::pointclouds_t pcs2;
-    pcs2.layers["original"] = pc2;
+    mola::LidarOdometry3D::lidar_scan_t pcs2;
+    pcs2.layers["raw"] = pc2;
     {
         mrpt::system::CTimeLoggerEntry tle(timlog, "filterPointCloud");
         module.filterPointCloud(pcs2);
     }
 
-    // Send to ICP all layers except "original":
+    // Send to ICP all layers except "raw":
     mola::LidarOdometry3D::ICP_Input icp_in;
-    icp_in.to_pc   = mola::LidarOdometry3D::pointclouds_t::Create();
-    icp_in.from_pc = mola::LidarOdometry3D::pointclouds_t::Create();
+    icp_in.to_pc   = mola::LidarOdometry3D::lidar_scan_t::Create();
+    icp_in.from_pc = mola::LidarOdometry3D::lidar_scan_t::Create();
 
     for (const auto& l : pcs1.layers)
-        if (l.first.compare("original") != 0)
+        if (l.first.compare("raw") != 0)
             icp_in.from_pc->layers[l.first] = l.second;
     for (const auto& l : pcs2.layers)
-        if (l.first.compare("original") != 0)
+        if (l.first.compare("raw") != 0)
             icp_in.to_pc->layers[l.first] = l.second;
 
     // Select ICP configuration parameter set:

@@ -16,6 +16,7 @@
 #include <mrpt/gui/CDisplayWindow3D.h>
 #include <mrpt/maps/CPointsMapXYZI.h>
 #include <mrpt/opengl/COpenGLScene.h>
+#include <mrpt/opengl/CTexturedPlane.h>
 #include <mrpt/opengl/stock_objects.h>
 #include <mrpt/otherlibs/tclap/CmdLine.h>
 #include <mrpt/system/CTimeLogger.h>
@@ -40,6 +41,8 @@ static mrpt::system::CTimeLogger timlog;
 
 void do_scan_segment_test()
 {
+    using namespace std::string_literals;
+
     // Load input point cloud:
     auto pc = mrpt::maps::CPointsMapXYZI::Create();
 
@@ -75,19 +78,20 @@ void do_scan_segment_test()
 
     module.initialize(str_params);
 
-    mola::LidarOdometry3D::pointclouds_t pcs;
-    pcs.layers["original"] = pc;
+    mola::LidarOdometry3D::lidar_scan_t scan;
+    scan.pc.point_layers["raw"] = pc;
 
     {
         mrpt::system::CTimeLoggerEntry tle(timlog, "filterPointCloud");
 
-        module.filterPointCloud(pcs);
+        module.filterPointCloud(scan);
     }
 
-    // Display "layers":
+    // Display "point_layers":
+    int x = 5, y = 5;
+
     std::map<std::string, mrpt::gui::CDisplayWindow3D::Ptr> wins;
-    int                                                     x = 5, y = 5;
-    for (const auto& layer : pcs.layers)
+    for (const auto& layer : scan.pc.point_layers)
     {
         const auto name = layer.first;
 
@@ -107,7 +111,7 @@ void do_scan_segment_test()
             scene->insert(gl_pc);
 
             auto msg = mrpt::format(
-                "layer=`%s`  => %u points.", name.c_str(),
+                "point_layers=`%s`  => %u points.", name.c_str(),
                 static_cast<unsigned int>(layer.second->size()));
             win->addTextMessage(
                 5, 5, msg, mrpt::img::TColorf(1, 1, 1), "sans", 10.0);
@@ -115,6 +119,53 @@ void do_scan_segment_test()
             win->setPos(x, y);
             y += 350;
         }
+        win->repaint();
+    }
+
+    // Display "planes":
+    {
+        // Plane width, plane freq for rendering:
+        const float pw = module.params_.voxel_filter_resolution * 0.5f;
+        const float pf = pw * 0.45f;
+
+        const auto name = "planes"s;
+
+        auto& win = wins[name] = mrpt::gui::CDisplayWindow3D::Create(name);
+        mrpt::opengl::COpenGLScene::Ptr   scene;
+        mrpt::gui::CDisplayWindow3DLocker lck(*win, scene);
+
+        scene->clear();
+        scene->insert(mrpt::opengl::stock_objects::CornerXYZSimple(1.0f, 4.0f));
+
+        // Overlay the raw points:
+        if (scan.pc.point_layers["raw"])
+        {
+            auto gl_pc = mrpt::opengl::CSetOfObjects::Create();
+            scan.pc.point_layers["raw"]->getAs3DObject(gl_pc);
+            scene->insert(gl_pc);
+        }
+
+        for (const auto& plane : scan.pc.planes)
+        {
+            auto gl_pl =
+                mrpt::opengl::CGridPlaneXY::Create(-pw, pw, -pw, pw, .0, pf);
+
+            mrpt::math::TPose3D planePose;
+            plane.plane.getAsPose3DForcingOrigin(plane.centroid, planePose);
+            gl_pl->setPose(planePose);
+
+            scene->insert(gl_pl);
+        }
+
+        auto msg = mrpt::format(
+            "layer=`%s`  => %u elements.", name.c_str(),
+            static_cast<unsigned int>(scan.pc.planes.size()));
+        win->addTextMessage(
+            5, 5, msg, mrpt::img::TColorf(1, 1, 1), "sans", 10.0);
+
+        win->setPos(x, y);
+        y += 350;
+
         win->repaint();
     }
 

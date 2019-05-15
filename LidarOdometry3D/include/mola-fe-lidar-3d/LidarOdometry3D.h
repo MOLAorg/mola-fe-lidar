@@ -16,8 +16,8 @@
 #include <mrpt/graphs/CNetworkOfPoses.h>
 #include <mrpt/maps/CPointsMap.h>
 #include <mrpt/slam/CICP.h>
-#include <p2p2/MultiCloudICP.h>
 #include <p2p2/PointCloudToVoxelGrid.h>
+#include <p2p2/PointsPlanesICP.h>
 #include <mutex>
 
 namespace mola
@@ -70,6 +70,7 @@ class LidarOdometry3D : public FrontEndBase
         unsigned int full_pointcloud_decimation{20};
         double       voxel_filter_resolution{.5};
         unsigned int voxel_filter_decimation{1};
+        unsigned int voxel_filter_min_point_count{20};
         float        voxel_filter_max_e2_e0{30.f}, voxel_filter_max_e1_e0{30.f};
         float voxel_filter_min_e2_e0{100.f}, voxel_filter_min_e1_e0{100.f};
 
@@ -103,21 +104,21 @@ class LidarOdometry3D : public FrontEndBase
 
     using topological_dist_t = std::size_t;
 
-    struct pointclouds_t : public mrpt::serialization::CSerializable
+    /** Different "layers" in which a point cloud is decomposed,
+     * for example: "edges", "planes", etc. plus features like lines, planes,...
+     */
+    struct lidar_scan_t : public mrpt::serialization::CSerializable
     {
-        DEFINE_SERIALIZABLE(pointclouds_t)
+        DEFINE_SERIALIZABLE(lidar_scan_t)
        public:
-        /** Different "layers" in which a point cloud is decomposed.
-         * For example: "edges", "planes", etc.
-         */
-        std::map<std::string, mrpt::maps::CPointsMap::Ptr> layers;
+        p2p2::PointsPlanesICP::pointcloud_t pc;
 
         inline bool hasLayer(const std::string& s) const
         {
-            return layers.find(s) != layers.end();
+            return pc.point_layers.find(s) != pc.point_layers.end();
         }
     };
-    void filterPointCloud(pointclouds_t& pcs);
+    void filterPointCloud(lidar_scan_t& pcs);
 
     enum class AlignKind : uint8_t
     {
@@ -133,7 +134,7 @@ class LidarOdometry3D : public FrontEndBase
         AlignKind           align_kind{AlignKind::LidarOdometry};
         id_t                to_id{mola::INVALID_ID};
         id_t                from_id{mola::INVALID_ID};
-        pointclouds_t::Ptr  to_pc, from_pc;
+        lidar_scan_t::Ptr   to_pc, from_pc;
         mrpt::math::TPose3D init_guess_to_wrt_from;
 
         std::vector<p2p2::Parameters> icp_params;
@@ -159,7 +160,7 @@ class LidarOdometry3D : public FrontEndBase
     struct MethodState
     {
         mrpt::Clock::time_point     last_obs_tim{};
-        pointclouds_t::Ptr          last_points{};
+        lidar_scan_t::Ptr           last_points{};
         mrpt::math::TTwist3D        last_iter_twist;
         bool                        last_iter_twist_is_good{false};
         id_t                        last_kf{mola::INVALID_ID};

@@ -28,17 +28,26 @@ struct plane_patch_t
 {
     mrpt::math::TPlane3D plane;
     mrpt::math::TPoint3D centroid;
+
+    plane_patch_t(
+        const mrpt::math::TPlane3D& pl, const mrpt::math::TPoint3D& center)
+        : plane(pl), centroid(center)
+    {
+    }
 };
 
-struct clouds_t
+struct pointcloud_t
 {
-    std::vector<mrpt::maps::CPointsMap::Ptr> point_layers;
-    std::vector<mrpt::math::TLine3D>         lines;
-    std::vector<plane_patch_t>               planes;
+    /** Different point layers, indexed by a descriptive name.
+     * The special name `raw` is reserved to the original, full point cloud.
+     */
+    std::map<std::string, mrpt::maps::CPointsMap::Ptr> point_layers;
+    std::vector<mrpt::math::TLine3D>                   lines;
+    std::vector<plane_patch_t>                         planes;
 };
 
 void align(
-    const clouds_t& pcs1, const clouds_t& pcs2,
+    const pointcloud_t& pcs1, const pointcloud_t& pcs2,
     const mrpt::math::TPose3D& init_guess_m2_wrt_m1, const Parameters& p,
     Results& result);
 

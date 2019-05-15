@@ -18,7 +18,7 @@
 using namespace p2p2;
 
 void MultiCloudICP::align(
-    const clouds_t& pcs1, const clouds_t& pcs2,
+    const pointcloud_t& pcs1, const pointcloud_t& pcs2,
     const mrpt::math::TPose3D& init_guess_m2_wrt_m1, const Parameters& p,
     Results& result)
 {

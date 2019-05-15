@@ -18,8 +18,8 @@
 using namespace p2p2;
 
 void PointsPlanesICP::align(
-    const PointsPlanesICP::clouds_t& pcs1,
-    const PointsPlanesICP::clouds_t& pcs2,
+    const PointsPlanesICP::pointcloud_t& pcs1,
+    const PointsPlanesICP::pointcloud_t& pcs2,
     const mrpt::math::TPose3D& init_guess_m2_wrt_m1, const Parameters& p,
     Results& result)
 {
@@ -32,7 +32,6 @@ void PointsPlanesICP::align(
     ASSERT_(
         !pcs1.point_layers.empty() ||
         (!pcs1.planes.empty() && !pcs2.planes.empty()));
-    const auto nPointLayers = pcs1.point_layers.size();
 
     // Reset output:
     result = Results();
@@ -53,10 +52,10 @@ void PointsPlanesICP::align(
 
     // Count of points:
     size_t pointcount1 = 0, pointcount2 = 0;
-    for (size_t layer = 0; layer < nPointLayers; layer++)
+    for (const auto& kv1 : pcs1.point_layers)
     {
-        pointcount1 += pcs1.point_layers[layer]->size();
-        pointcount2 += pcs2.point_layers[layer]->size();
+        pointcount1 += kv1.second->size();
+        pointcount2 += pcs2.point_layers.at(kv1.first)->size();
     }
     ASSERT_(pointcount1 > 0 || !pcs1.planes.empty());
     ASSERT_(pointcount2 > 0 || !pcs2.planes.empty());
@@ -69,7 +68,7 @@ void PointsPlanesICP::align(
 
     for (; result.nIterations < p.maxIterations; result.nIterations++)
     {
-        std::vector<mrpt::maps::TMatchingExtraResults> mres(nPointLayers);
+        std::map<std::string, mrpt::maps::TMatchingExtraResults> mres;
 
         // Measure angle distances from the current estimate:
         mp.angularDistPivotPoint = mrpt::math::TPoint3D(solution.asTPose());
@@ -80,16 +79,16 @@ void PointsPlanesICP::align(
         // Correspondences 1/2: point layers:
         // -------------------------------------
         // Find correspondences for each point cloud "layer":
-        for (size_t layer = 0; layer < nPointLayers; layer++)
+        for (const auto& kv1 : pcs1.point_layers)
         {
-            const auto &m1 = pcs1.point_layers[layer],
-                       &m2 = pcs2.point_layers[layer];
+            const auto &m1 = kv1.second, &m2 = pcs2.point_layers.at(kv1.first);
             ASSERT_(m1);
             ASSERT_(m2);
 
             // Find closest pairings
             mrpt::tfest::TMatchingPairList mpl;
-            m1->determineMatching3D(m2.get(), solution, mpl, mp, mres[layer]);
+            m1->determineMatching3D(
+                m2.get(), solution, mpl, mp, mres[kv1.first]);
 
             // merge lists:
             pairings.paired_points.insert(
@@ -155,10 +154,6 @@ void PointsPlanesICP::align(
 static auto vector_rot_Z_90d_CCW(const mrpt::math::TVector3D& v)
 {
     return mrpt::math::TVector3D(-v.y, v.x, v.z);
-}
-static auto vector_rot_Z_90d_CW(const mrpt::math::TVector3D& v)
-{
-    return mrpt::math::TVector3D(v.y, -v.x, v.z);
 }
 
 // Core of the OLAE algorithm.

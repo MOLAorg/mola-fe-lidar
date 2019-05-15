@@ -45,39 +45,30 @@ MRPT_INITIALIZER(do_register)
     MOLA_REGISTER_MODULE(LidarOdometry3D)
 
     // Register serializable classes:
-    mrpt::rtti::registerClass(CLASS_ID(mola::LidarOdometry3D::pointclouds_t));
+    mrpt::rtti::registerClass(CLASS_ID(mola::LidarOdometry3D::lidar_scan_t));
 }
 
-IMPLEMENTS_SERIALIZABLE(pointclouds_t, CSerializable, mola::LidarOdometry3D)
+IMPLEMENTS_SERIALIZABLE(lidar_scan_t, CSerializable, mola::LidarOdometry3D)
 
 //
-uint8_t LidarOdometry3D::pointclouds_t::serializeGetVersion() const
-{
-    return 0;
-}
-void LidarOdometry3D::pointclouds_t::serializeTo(
+uint8_t LidarOdometry3D::lidar_scan_t::serializeGetVersion() const { return 0; }
+void    LidarOdometry3D::lidar_scan_t::serializeTo(
     mrpt::serialization::CArchive& out) const
 {
-    out.WriteAs<uint32_t>(layers.size());
-    for (const auto& l : layers) out << l.first << l.second;
+    // out.WriteAs<uint32_t>(layers.size());
+    // for (const auto& l : layers) out << l.first << l.second;
+    MRPT_TODO("Implement");
+    // out << pc.point_layers << pc.lines << pc.planes;
 }
-void LidarOdometry3D::pointclouds_t::serializeFrom(
+void LidarOdometry3D::lidar_scan_t::serializeFrom(
     mrpt::serialization::CArchive& in, uint8_t version)
 {
     switch (version)
     {
         case 0:
         {
-            uint32_t n = in.ReadAs<uint32_t>();
-            layers.clear();
-            for (size_t i = 0; i < n; i++)
-            {
-                std::string name;
-                in >> name;
-                auto obj = in.ReadObject();
-                layers[name] =
-                    mrpt::ptr_cast<mrpt::maps::CPointsMap>::from(obj);
-            }
+            MRPT_TODO("Implement");
+            // in >> pc.point_layers >> pc.lines >> pc.planes;
         }
         break;
         default:
@@ -147,6 +138,7 @@ void LidarOdometry3D::initialize(const std::string& cfg_block)
     YAML_LOAD_OPT(params_, decimate_to_point_count, unsigned int);
     YAML_LOAD_OPT(params_, voxel_filter_resolution, double);
     YAML_LOAD_OPT(params_, voxel_filter_decimation, unsigned int);
+    YAML_LOAD_OPT(params_, voxel_filter_min_point_count, unsigned int);
     YAML_LOAD_OPT(params_, full_pointcloud_decimation, unsigned int);
     YAML_LOAD_OPT(params_, voxel_filter_max_e2_e0, float);
     YAML_LOAD_OPT(params_, voxel_filter_max_e1_e0, float);
@@ -252,13 +244,13 @@ void LidarOdometry3D::doProcessNewObservation(CObservation::Ptr& o)
         }
 
         // Extract points from observation:
-        auto this_obs_points = pointclouds_t::Create();
+        auto this_obs_points = lidar_scan_t::Create();
         bool have_points;
         {
             ProfilerEntry tle(
                 profiler_, "doProcessNewObservation.1.obs2pointcloud");
 
-            const auto& pc = this_obs_points->layers["original"] =
+            const auto& pc = this_obs_points->pc.point_layers["raw"] =
                 mrpt::maps::CSimplePointsMap::Create();
 
             have_points = pc->insertObservationPtr(o);
@@ -272,7 +264,7 @@ void LidarOdometry3D::doProcessNewObservation(CObservation::Ptr& o)
             filterPointCloud(*this_obs_points);
 
             // Remove the original, full-res point cloud to save memory:
-            this_obs_points->layers.erase("original");
+            this_obs_points->pc.point_layers.erase("raw");
         }
 
         profiler_.enter("doProcessNewObservation.2b.copy_vars");
@@ -297,7 +289,7 @@ void LidarOdometry3D::doProcessNewObservation(CObservation::Ptr& o)
         bool create_keyframe = false;
 
         // First time we cannot do ICP since we need at least two pointclouds:
-        if (!last_points || last_points->layers.empty())
+        if (!last_points || last_points->pc.point_layers.empty())
         {
             // Skip ICP.
             MRPT_LOG_DEBUG("First pointcloud: skipping ICP.");
@@ -686,12 +678,12 @@ void LidarOdometry3D::checkForNearbyKFs()
                 ProfilerEntry tle(
                     profiler_, "checkForNearbyKFs.readPCsFromWorldModel");
 
-                d->to_pc = mrpt::ptr_cast<pointclouds_t>::from(
+                d->to_pc = mrpt::ptr_cast<lidar_scan_t>::from(
                     worldmodel_->entity_annotations_by_id(d->to_id)
                         .at(ANNOTATION_NAME_PC_LAYERS)
                         .value());
 
-                d->from_pc = mrpt::ptr_cast<pointclouds_t>::from(
+                d->from_pc = mrpt::ptr_cast<lidar_scan_t>::from(
                     worldmodel_->entity_annotations_by_id(d->from_id)
                         .at(ANNOTATION_NAME_PC_LAYERS)
                         .value());
@@ -891,16 +883,13 @@ void LidarOdometry3D::run_one_icp(const ICP_Input& in, ICP_Output& out)
 
         ASSERT_(!in.icp_params.empty());
 
-        size_t                        largest_pc_count = 1;
-        p2p2::MultiCloudICP::clouds_t pcs_from, pcs_to;
-        for (auto& layer : in.from_pc->layers)
-        {
-            pcs_from.push_back(layer.second);
-            pcs_to.push_back(in.to_pc->layers.at(layer.first));
+        const p2p2::PointsPlanesICP::pointcloud_t& pcs_from = in.from_pc->pc;
+        const p2p2::PointsPlanesICP::pointcloud_t& pcs_to   = in.to_pc->pc;
 
+        // automatically guess a good decimation factor:
+        size_t largest_pc_count = 1;
+        for (const auto& layer : pcs_from.point_layers)
             mrpt::keep_max(largest_pc_count, layer.second->size());
-        }
-
         unsigned int decim = 1;
         if (params_.decimate_to_point_count > 0)
             decim = static_cast<unsigned>(
@@ -918,7 +907,7 @@ void LidarOdometry3D::run_one_icp(const ICP_Input& in, ICP_Output& out)
             icp_params.corresponding_points_decimation = decim;
 
             p2p2::Results icp_result;
-            p2p2::MultiCloudICP::align(
+            p2p2::PointsPlanesICP::align(
                 pcs_from, pcs_to, current_solution, icp_params, icp_result);
 
             if (icp_result.goodness > 0)
@@ -954,6 +943,7 @@ void LidarOdometry3D::run_one_icp(const ICP_Input& in, ICP_Output& out)
                      (in.align_kind == AlignKind::LoopClosure &&
                       params_.debug_save_loop_closures);
 
+#if 0
     if (gen_debug)
     {
         const auto num_pc_layers = in.from_pc->layers.size();
@@ -1094,32 +1084,29 @@ void LidarOdometry3D::run_one_icp(const ICP_Input& in, ICP_Output& out)
             }
         }
     }
+#endif
 
     MRPT_END
 }
 
-void LidarOdometry3D::filterPointCloud(pointclouds_t& pcs)
+void LidarOdometry3D::filterPointCloud(lidar_scan_t& pcs)
 {
     MRPT_START
 
     // Get a ref to the input, full resolution point cloud:
-    const auto& pcptr = pcs.layers["original"];
-    ASSERTMSG_(pcptr, "Missing point cloud layer: `original`");
+    const auto& pcptr = pcs.pc.point_layers["raw"];
+    ASSERTMSG_(pcptr, "Missing point cloud layer: `raw`");
     const auto& pc = *pcptr;
 
-    auto& pc_edges      = pcs.layers["edges"];
-    auto& pc_planes     = pcs.layers["planes"];
-    auto& pc_full_decim = pcs.layers["full_decim"];
+    auto& pc_edges = pcs.pc.point_layers["edges"];
+    auto& planes   = pcs.pc.planes;
+
     if (!pc_edges) pc_edges = mrpt::maps::CSimplePointsMap::Create();
-    if (!pc_planes) pc_planes = mrpt::maps::CSimplePointsMap::Create();
-    if (!pc_full_decim) pc_full_decim = mrpt::maps::CSimplePointsMap::Create();
 
     pc_edges->clear();
     pc_edges->reserve(pc.size() / 10);
-    pc_planes->clear();
-    pc_planes->reserve(pc.size() / 10);
-    pc_full_decim->clear();
-    pc_full_decim->reserve(pc.size() / 10);
+    planes.clear();
+    planes.reserve(pc.size() / 1000);
 
     state_.filter_grid.clear();
     state_.filter_grid.processPointCloud(pc);
@@ -1137,7 +1124,8 @@ void LidarOdometry3D::filterPointCloud(pointclouds_t& pcs)
     for (const auto& vxl_pts : state_.filter_grid.pts_voxels)
     {
         if (!vxl_pts.indices.empty()) nTotalVoxels++;
-        if (vxl_pts.indices.size() < 5) continue;
+        if (vxl_pts.indices.size() < params_.voxel_filter_min_point_count)
+            continue;
 
         // Analyze the voxel contents:
         mrpt::math::TPoint3Df mean{0, 0, 0};
@@ -1177,39 +1165,55 @@ void LidarOdometry3D::filterPointCloud(pointclouds_t& pcs)
 
         const float e0 = eig_vals[0], e1 = eig_vals[1], e2 = eig_vals[2];
 
-        mrpt::maps::CPointsMap* dest = nullptr;
         if (e2 < max_e20 * e0 && e1 < max_e10 * e0)
         {
+            // Classified as EDGE
+            // ------------------------
             nEdgeVoxels++;
-            dest = pc_edges.get();
-        }
-        else if (e2 > min_e20 * e0 && e1 > min_e10 * e0)
-        {
-            // Filter out horizontal planes, since their uneven density
-            // makes ICP fail to converge.
-            // A plane on the ground has its 0'th eigenvector like [0 0 1]
-            const Eigen::Vector3f ev0 = esolver.eigenvectors().col(0);
-            // || mean.x > 10.0f || mean.y > 10.0f)
-            if (std::abs(ev0.z()) < 0.9f)
-            {
-                nPlaneVoxels++;
-                dest = pc_planes.get();
-            }
-        }
-        if (dest != nullptr)
-        {
             for (size_t i = 0; i < vxl_pts.indices.size();
                  i += params_.voxel_filter_decimation)
             {
                 const auto pt_idx = vxl_pts.indices[i];
-                dest->insertPointFast(xs[pt_idx], ys[pt_idx], zs[pt_idx]);
+                pc_edges->insertPointFast(xs[pt_idx], ys[pt_idx], zs[pt_idx]);
             }
         }
-        for (size_t i = 0; i < vxl_pts.indices.size();
-             i += params_.full_pointcloud_decimation)
+        else if (e2 > min_e20 * e0 && e1 > min_e10 * e0)
         {
-            const auto pt_idx = vxl_pts.indices[i];
-            pc_full_decim->insertPointFast(xs[pt_idx], ys[pt_idx], zs[pt_idx]);
+            // Classified as PLANE
+            // ------------------------
+            nPlaneVoxels++;
+
+            // Define a plane from its centroid + a normal:
+            const auto pl_c = mrpt::math::TPoint3D(mean);
+
+            // Normal = largest eigenvector:
+            const Eigen::Vector3f ev0 = esolver.eigenvectors().col(0);
+            auto pl_n = mrpt::math::TVector3D(ev0.x(), ev0.y(), ev0.z());
+
+            // Normal direction criterion: make it to face towards the vehicle.
+            // We can use the dot product to find it out, since pointclouds are
+            // given in vehicle-frame coordinates.
+            {
+                // Unit vector: vehicle -> plane centroid:
+                ASSERT_ABOVE_(pl_c.norm(), 1e-3);
+                const auto u = pl_c * (1.0 / pl_c.norm());
+                const auto dot_prod =
+                    mrpt::math::dotProduct<3, double>(u, pl_n);
+
+                // It should be <0 if the normal is pointing to the vehicle.
+                // Otherwise, reverse the normal.
+                if (dot_prod > 0) pl_n = -pl_n;
+            }
+
+            // Add plane & centroid:
+            const auto pl = mrpt::math::TPlane3D(pl_c, pl_n);
+            planes.emplace_back(pl, pl_c);
+
+#if 0
+            MRPT_LOG_INFO_STREAM(
+                "[VoxelGridFilter] Detected plane with "
+                << vxl_pts.indices.size() << " pts.");
+#endif
         }
     }
     MRPT_LOG_DEBUG_STREAM(
