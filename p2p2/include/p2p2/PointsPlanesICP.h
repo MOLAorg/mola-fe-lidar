@@ -39,7 +39,9 @@ struct plane_patch_t
 struct pointcloud_t
 {
     /** Different point layers, indexed by a descriptive name.
-     * The special name `raw` is reserved to the original, full point cloud.
+     * Known layer names:
+     * - `raw`: reserved to the original, full point cloud (if kept here).
+     * - `plane_centroids`: a point for each plane in `planes` (same order).
      */
     std::map<std::string, mrpt::maps::CPointsMap::Ptr> point_layers;
     std::vector<mrpt::math::TLine3D>                   lines;

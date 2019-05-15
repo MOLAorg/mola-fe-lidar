@@ -36,7 +36,7 @@ void PointsPlanesICP::align(
     // Reset output:
     result = Results();
 
-    // Matching params:
+    // Matching params for point-to-point:
     mrpt::maps::TMatchingParams mp;
     // Distance threshold
     mp.maxDistForCorrespondence = p.thresholdDist;
@@ -49,6 +49,17 @@ void PointsPlanesICP::align(
     // For decimation: cycle through all possible points, even if we decimate
     // them, in such a way that different points are used in each iteration.
     mp.offset_other_map_points = 0;
+
+    // Matching params for plane-to-plane (their centroids only at this point):
+    mrpt::maps::TMatchingParams mp_planes;
+    // Distance threshold
+    mp.maxDistForCorrespondence =
+        p.thresholdDist +
+        1.0 /* since plane centroids must not show up at the same location */;
+    // Angular threshold
+    mp.maxAngularDistForCorrespondence = p.thresholdAng;
+    mp.onlyKeepTheClosest              = true;
+    mp.decimation_other_map_points     = 1;
 
     // Count of points:
     size_t pointcount1 = 0, pointcount2 = 0;
@@ -76,8 +87,8 @@ void PointsPlanesICP::align(
         // the global list of pairings:
         OLAE_Match_Input pairings;
 
-        // Correspondences 1/2: point layers:
-        // -------------------------------------
+        // Correspondences for each point layer:
+        // ---------------------------------------
         // Find correspondences for each point cloud "layer":
         for (const auto& kv1 : pcs1.point_layers)
         {
@@ -91,14 +102,23 @@ void PointsPlanesICP::align(
                 m2.get(), solution, mpl, mp, mres[kv1.first]);
 
             // merge lists:
-            pairings.paired_points.insert(
-                pairings.paired_points.end(), mpl.begin(), mpl.end());
-        }
+            // handle specially the plane-to-plane matching:
+            if (kv1.first != std::string("plane_centroids"))
+            {
+                // A standard layer:
+                pairings.paired_points.insert(
+                    pairings.paired_points.end(), mpl.begin(), mpl.end());
+            }
+            else
+            {
+                // Plane-to-plane correspondence:
+                MRPT_TODO("continue");
 
-        // Correspondences 2/2: planes to planes
-        // ---------------------------------------
-        MRPT_TODO("find plane correspondences");
-        THROW_EXCEPTION("to do!");
+                // 1) Check fo pairing sanity:
+
+                // 2) append to list of plane pairs:
+            }
+        }
 
         // Ratio of points with a valid pairing:
         result.goodness = p.corresponding_points_decimation *

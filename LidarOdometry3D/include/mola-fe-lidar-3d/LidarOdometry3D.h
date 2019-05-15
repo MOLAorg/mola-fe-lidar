@@ -118,7 +118,10 @@ class LidarOdometry3D : public FrontEndBase
             return pc.point_layers.find(s) != pc.point_layers.end();
         }
     };
-    void filterPointCloud(lidar_scan_t& pcs);
+
+    /** Parses a raw point cloud and split it into layers, features, etc.
+     * \note This is NOT multi-thread safe. */
+    lidar_scan_t filterPointCloud(const mrpt::maps::CPointsMap& rawPoints);
 
     enum class AlignKind : uint8_t
     {

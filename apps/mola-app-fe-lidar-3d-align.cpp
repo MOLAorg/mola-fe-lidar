@@ -50,6 +50,8 @@ static mrpt::system::CTimeLogger timlog;
 
 void do_scan_align_test()
 {
+    using namespace std::string_literals;
+
     // Load input point cloud:
     auto       pc1  = mrpt::maps::CPointsMapXYZI::Create();
     const auto fil1 = arg_kitti_file1.getValue();
@@ -87,30 +89,25 @@ void do_scan_align_test()
     module.initialize(str_params);
 
     mola::LidarOdometry3D::lidar_scan_t pcs1;
-    pcs1.layers["raw"] = pc1;
     {
         mrpt::system::CTimeLoggerEntry tle(timlog, "filterPointCloud");
-        module.filterPointCloud(pcs1);
+        pcs1 = module.filterPointCloud(*pc1);
     }
 
     mola::LidarOdometry3D::lidar_scan_t pcs2;
-    pcs2.layers["raw"] = pc2;
     {
         mrpt::system::CTimeLoggerEntry tle(timlog, "filterPointCloud");
-        module.filterPointCloud(pcs2);
+        pcs2 = module.filterPointCloud(*pc2);
     }
 
     // Send to ICP all layers except "raw":
     mola::LidarOdometry3D::ICP_Input icp_in;
-    icp_in.to_pc   = mola::LidarOdometry3D::lidar_scan_t::Create();
-    icp_in.from_pc = mola::LidarOdometry3D::lidar_scan_t::Create();
+    icp_in.to_pc   = mola::LidarOdometry3D::lidar_scan_t::Create(pcs2);
+    icp_in.from_pc = mola::LidarOdometry3D::lidar_scan_t::Create(pcs1);
 
-    for (const auto& l : pcs1.layers)
-        if (l.first.compare("raw") != 0)
-            icp_in.from_pc->layers[l.first] = l.second;
-    for (const auto& l : pcs2.layers)
-        if (l.first.compare("raw") != 0)
-            icp_in.to_pc->layers[l.first] = l.second;
+    // Add raw now, afterwards:
+    pcs2.pc.point_layers["raw"] = pc2;
+    pcs1.pc.point_layers["raw"] = pc1;
 
     // Select ICP configuration parameter set:
     switch (arg_icp_params_set.getValue())
@@ -141,7 +138,7 @@ void do_scan_align_test()
     // Display "layers":
     std::map<std::string, mrpt::gui::CDisplayWindow3D::Ptr> wins;
     int                                                     x = 5, y = 5;
-    for (const auto& layer : pcs1.layers)
+    for (const auto& layer : pcs1.pc.point_layers)
     {
         const auto name = layer.first;
 
@@ -162,9 +159,9 @@ void do_scan_align_test()
             scene->insert(gl_pc1);
 
             auto gl_pc2 = mrpt::opengl::CSetOfObjects::Create();
-            pcs2.layers.at(layer.first)->renderOptions.color =
+            pcs2.pc.point_layers.at(layer.first)->renderOptions.color =
                 mrpt::img::TColorf(0, 0, 1);
-            pcs2.layers.at(layer.first)->getAs3DObject(gl_pc2);
+            pcs2.pc.point_layers.at(layer.first)->getAs3DObject(gl_pc2);
             gl_pc2->setPose(icp_out.found_pose_to_wrt_from.mean);
             scene->insert(gl_pc2);
 
@@ -177,6 +174,65 @@ void do_scan_align_test()
             win->setPos(x, y);
             y += 350;
         }
+        win->repaint();
+    }
+
+    // Display "planes":
+    {
+        // Plane width, plane freq for rendering:
+        const float pw = module.params_.voxel_filter_resolution * 0.5f;
+        const float pf = pw * 0.45f;
+
+        const auto name = "planes"s;
+
+        auto& win = wins[name] = mrpt::gui::CDisplayWindow3D::Create(name);
+        mrpt::opengl::COpenGLScene::Ptr   scene;
+        mrpt::gui::CDisplayWindow3DLocker lck(*win, scene);
+
+        scene->clear();
+        scene->insert(mrpt::opengl::stock_objects::CornerXYZSimple(1.0f, 4.0f));
+
+        // Overlay the raw points:
+#if 0
+        if (scan.pc.point_layers["raw"])
+        {
+            auto gl_pc = mrpt::opengl::CSetOfObjects::Create();
+            scan.pc.point_layers["raw"]->getAs3DObject(gl_pc);
+            scene->insert(gl_pc);
+        }
+#endif
+
+        for (const auto& plane : pcs1.pc.planes)
+        {
+            auto gl_pl =
+                mrpt::opengl::CGridPlaneXY::Create(-pw, pw, -pw, pw, .0, pf);
+            gl_pl->setColor_u8(0xff, 0x00, 0x00);
+            mrpt::math::TPose3D planePose;
+            plane.plane.getAsPose3DForcingOrigin(plane.centroid, planePose);
+            gl_pl->setPose(planePose);
+            scene->insert(gl_pl);
+        }
+
+        for (const auto& plane : pcs2.pc.planes)
+        {
+            auto gl_pl =
+                mrpt::opengl::CGridPlaneXY::Create(-pw, pw, -pw, pw, .0, pf);
+            gl_pl->setColor_u8(0x00, 0x00, 0xff);
+            mrpt::math::TPose3D planePose;
+            plane.plane.getAsPose3DForcingOrigin(plane.centroid, planePose);
+            gl_pl->setPose(planePose);
+            scene->insert(gl_pl);
+        }
+
+        auto msg = mrpt::format(
+            "layer=`%s`  => %u elements.", name.c_str(),
+            static_cast<unsigned int>(pcs1.pc.planes.size()));
+        win->addTextMessage(
+            5, 5, msg, mrpt::img::TColorf(1, 1, 1), "sans", 10.0);
+
+        win->setPos(x, y);
+        y += 350;
+
         win->repaint();
     }
 

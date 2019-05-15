@@ -79,13 +79,13 @@ void do_scan_segment_test()
     module.initialize(str_params);
 
     mola::LidarOdometry3D::lidar_scan_t scan;
-    scan.pc.point_layers["raw"] = pc;
 
     {
         mrpt::system::CTimeLoggerEntry tle(timlog, "filterPointCloud");
-
-        module.filterPointCloud(scan);
+        scan = module.filterPointCloud(*pc);
     }
+
+    scan.pc.point_layers["raw"] = pc;
 
     // Display "point_layers":
     int x = 5, y = 5;

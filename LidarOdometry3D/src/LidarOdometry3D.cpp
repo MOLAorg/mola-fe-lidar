@@ -243,28 +243,26 @@ void LidarOdometry3D::doProcessNewObservation(CObservation::Ptr& o)
             return;
         }
 
-        // Extract points from observation:
+        // Extract points (and clasify them, extract features,...) from
+        // observation:
         auto this_obs_points = lidar_scan_t::Create();
         bool have_points;
         {
-            ProfilerEntry tle(
-                profiler_, "doProcessNewObservation.1.obs2pointcloud");
+            auto raw_pc = mrpt::maps::CSimplePointsMap::Create();
 
-            const auto& pc = this_obs_points->pc.point_layers["raw"] =
-                mrpt::maps::CSimplePointsMap::Create();
+            {
+                ProfilerEntry tle(
+                    profiler_, "doProcessNewObservation.1.obs2pc");
+                have_points = raw_pc->insertObservationPtr(o);
+            }
 
-            have_points = pc->insertObservationPtr(o);
-        }
-
-        // Filter: keep corner areas only:
-        {
-            ProfilerEntry tle(
-                profiler_, "doProcessNewObservation.2.filter_pointclouds");
-
-            filterPointCloud(*this_obs_points);
-
-            // Remove the original, full-res point cloud to save memory:
-            this_obs_points->pc.point_layers.erase("raw");
+            {
+                ProfilerEntry tle(
+                    profiler_, "doProcessNewObservation.2.filter_pointclouds");
+                *this_obs_points = filterPointCloud(*raw_pc);
+            }
+            // We don't keep the original, full-res point cloud to save
+            // memory. raw_pc will be freed as it goes out of scope here.
         }
 
         profiler_.enter("doProcessNewObservation.2b.copy_vars");
@@ -1089,24 +1087,22 @@ void LidarOdometry3D::run_one_icp(const ICP_Input& in, ICP_Output& out)
     MRPT_END
 }
 
-void LidarOdometry3D::filterPointCloud(lidar_scan_t& pcs)
+LidarOdometry3D::lidar_scan_t LidarOdometry3D::filterPointCloud(
+    const mrpt::maps::CPointsMap& pc)
 {
     MRPT_START
 
-    // Get a ref to the input, full resolution point cloud:
-    const auto& pcptr = pcs.pc.point_layers["raw"];
-    ASSERTMSG_(pcptr, "Missing point cloud layer: `raw`");
-    const auto& pc = *pcptr;
+    lidar_scan_t scan;
 
-    auto& pc_edges = pcs.pc.point_layers["edges"];
-    auto& planes   = pcs.pc.planes;
+    auto& pc_edges           = scan.pc.point_layers["edges"];
+    auto& pc_plane_centroids = scan.pc.point_layers["plane_centroids"];
+    auto& planes             = scan.pc.planes;
 
-    if (!pc_edges) pc_edges = mrpt::maps::CSimplePointsMap::Create();
-
-    pc_edges->clear();
+    pc_edges           = mrpt::maps::CSimplePointsMap::Create();
+    pc_plane_centroids = mrpt::maps::CSimplePointsMap::Create();
     pc_edges->reserve(pc.size() / 10);
-    planes.clear();
     planes.reserve(pc.size() / 1000);
+    pc_plane_centroids->reserve(pc.size() / 1000);
 
     state_.filter_grid.clear();
     state_.filter_grid.processPointCloud(pc);
@@ -1209,6 +1205,8 @@ void LidarOdometry3D::filterPointCloud(lidar_scan_t& pcs)
             const auto pl = mrpt::math::TPlane3D(pl_c, pl_n);
             planes.emplace_back(pl, pl_c);
 
+            // Also: add the centroid to this special layer:
+            pc_plane_centroids->insertPoint(pl_c);
 #if 0
             MRPT_LOG_INFO_STREAM(
                 "[VoxelGridFilter] Detected plane with "
@@ -1220,5 +1218,8 @@ void LidarOdometry3D::filterPointCloud(lidar_scan_t& pcs)
         "[VoxelGridFilter] Voxel counts: total=" << nTotalVoxels
                                                  << " edges=" << nEdgeVoxels
                                                  << " planes=" << nPlaneVoxels);
+
+    return scan;
+
     MRPT_END
 }
