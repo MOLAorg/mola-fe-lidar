@@ -156,31 +156,9 @@ static auto vector_rot_Z_90d_CCW(const mrpt::math::TVector3D& v)
 {
     return mrpt::math::TVector3D(-v.y, v.x, v.z);
 }
-
-/// Gibbs rotation composition with a 90 degrees CCW rotation
-template <typename VEC3>
-VEC3 gibbs_rot_Z_90d_CCW(const VEC3& v)
+static auto vector_rot_Z_90d_CW(const mrpt::math::TVector3D& v)
 {
-    // Gibbs rotation:
-    // g \oplus f = (g+f- g \times f)/( 1- g \dot f)
-    //
-    // For the case of f=[0;0;1] * tan(90/2) =[0;0;1] (90 deg, +Z):
-    //
-    ASSERT_ABOVE_(std::abs(v[2]), 1e-3);
-
-    return VEC3(v[0] - v[1], v[1] + v[0], v[2] + 1.) * (1. / (1. - v[2]));
-}
-
-/// Gibbs rotation composition with a 90 degrees CW rotation
-template <typename VEC3>
-VEC3 gibbs_rot_Z_90d_CW(const VEC3& v)
-{
-    // Gibbs rotation:
-    // g \oplus f = (g+f- g \times f)/( 1- g \dot f)
-    //
-    // For the case of f=[0;0;1] * tan(-90/2) =[0;0;-1] (90 deg, +Z):
-
-    return VEC3(v[0] + v[1], v[1] - v[0], v[2] + 1.) * (1. / (1. + v[2]));
+    return mrpt::math::TVector3D(v.y, -v.x, v.z);
 }
 
 // Core of the OLAE algorithm.
@@ -201,24 +179,43 @@ static std::tuple<Eigen::Matrix3d, Eigen::Vector3d> olae_build_linear_system(
     Eigen::Matrix3d M = Eigen::Matrix3d::Zero();
     Eigen::Vector3d v = Eigen::Vector3d::Zero();
 
-    const auto nPts        = in.paired_points.size();
+    const auto nPoints     = in.paired_points.size();
+    const auto nLines      = in.paired_lines.size();
     const auto nPlanes     = in.paired_planes.size();
-    const auto nAllMatches = nPts + nPlanes;
+    const auto nAllMatches = nPoints + nPlanes;
+
+    // Normalized weights for attitude "waXX":
+    double waPoints, waLines, waPlanes;
+    {
+        const auto wPt = in.weights.attitude.points,
+                   wLi = in.weights.attitude.lines,
+                   wPl = in.weights.attitude.planes;
+
+        ASSERTMSG_(
+            wPt + wLi + wPl > .0,
+            "All, point, line, plane attidude weights, are <=0 (!)");
+
+        const auto k = 1.0 / (wPt * nPoints + wLi * nLines + wPl * nPlanes);
+        waPoints     = wPt * k;
+        waLines      = wLi * k;
+        waPlanes     = wPl * k;
+    }
 
     // Terms contributed by points & vectors have now the uniform form of
     // unit vectors:
-    MRPT_TODO("different weights");
-    const double wi_all = 1.0 / nAllMatches;
 
     for (std::size_t i = 0; i < nAllMatches; i++)
     {
         // Get "bi" (this/global) & "ri" (other/local) vectors:
         TVector3D bi, ri;
+        double    wi = .0;
 
-        if (i < nPts)
+        // Points, lines, planes, are all stored in sequence:
+        if (i < nPoints)
         {
             // point-to-point pairing:  normalize(point-centroid)
             const auto& p = in.paired_points[i];
+            wi            = waPoints;
 
             bi = TVector3D(p.this_x, p.this_y, p.this_z) - ct_this;
             ri = TVector3D(p.other_x, p.other_y, p.other_z) - ct_other;
@@ -231,10 +228,21 @@ static std::tuple<Eigen::Matrix3d, Eigen::Vector3d> olae_build_linear_system(
             bi *= 1.0 / bi_n;
             ri *= 1.0 / ri_n;
         }
+        else if (i < nPoints + nLines)
+        {
+            // line-to-line pairing:
+            wi = waLines;
+
+            const auto idxLine = i - nPoints;
+            MRPT_TODO("handle lines");
+            THROW_EXCEPTION("handle lines");
+        }
         else
         {
-            const auto idxPlane = i - nPts;
             // plane-to-plane pairing:
+            wi = waPlanes;
+
+            const auto idxPlane = i - (nPoints + nLines);
             bi = in.paired_planes[idxPlane].p_this.plane.getNormalVector();
             ri = in.paired_planes[idxPlane].p_other.plane.getNormalVector();
 
@@ -242,15 +250,16 @@ static std::tuple<Eigen::Matrix3d, Eigen::Vector3d> olae_build_linear_system(
             ASSERTDEB_BELOW_(std::abs(ri.norm() - 1.0), 0.01);
         }
 
-        // If we are in a second stage, let's relinearize around a rotation of
-        // +PI/2 along +Z, to avoid working near the Gibbs vector singularity:
+        // If we are in a second stage, let's relinearize around a rotation
+        // of +PI/2 along +Z, to avoid working near the Gibbs vector
+        // singularity:
         if (do_relinearize_singularity)
         {
             // Rotate:
             ri = vector_rot_Z_90d_CCW(ri);
         }
 
-        const double wi = wi_all;
+        ASSERT_(wi > .0);
 
         // M+=(1/2)* ([s_i]_{x})^2
         // with: s_i = b_i + r_i
@@ -331,34 +340,42 @@ void PointsPlanesICP::olae_match(
     //   p_this = pose \oplus p_other
     //   p_A    = pose \oplus p_B      --> pB = p_A \ominus pose
 
-    const auto nPts        = in.paired_points.size();
+    const auto nPoints     = in.paired_points.size();
+    const auto nLines      = in.paired_lines.size();
     const auto nPlanes     = in.paired_planes.size();
-    const auto nAllMatches = nPts + nPlanes;
+    const auto nAllMatches = nPoints + nLines + nPlanes;
 
     // Reset output to defaults:
     result = OLAE_Match_Result();
 
-    ASSERT_(in.weight_points >= .0);
-    ASSERT_(in.weight_planes >= .0);
+    // Normalize weights for each feature type and for each target (attitude
+    // / translation):
+    ASSERT_(in.weights.attitude.points >= .0);
+    ASSERT_(in.weights.attitude.lines >= .0);
+    ASSERT_(in.weights.attitude.planes >= .0);
+    ASSERT_(in.weights.translation.points >= .0);
+    ASSERT_(in.weights.translation.planes >= .0);
 
-    double wPoints, wPlanes;
+    // Normalized weights for centroid "wcXX":
+    double wcPoints, wcPlanes;
     {
-        const auto wPt = in.weight_points, wPl = in.weight_planes;
+        const auto wPt = in.weights.translation.points,
+                   wPl = in.weights.translation.planes;
 
-        const double wSum = wPt + wPl;
-        ASSERTMSG_(wSum > .0, "Both, point and plane weights, are <=0 (!)");
+        ASSERTMSG_(
+            wPt + wPl > .0,
+            "Both, point and plane translation weights, are <=0 (!)");
 
-        wPoints = wPt / (wPt * nPts + wPl * nPlanes);
-        wPlanes = wPl / (wPt * nPts + wPl * nPlanes);
+        const auto k = 1.0 / (wPt * nPoints + wPl * nPlanes);
+        wcPoints     = wPt * k;
+        wcPlanes     = wPl * k;
     }
-
-    // Find centroids:
 
     // Compute the centroids:
     TPoint3D ct_other(0, 0, 0), ct_this(0, 0, 0);
 
-    // Add global coordinate of points for now, we'll convert them later to unit
-    // vectors relative to the centroids:
+    // Add global coordinate of points for now, we'll convert them later to
+    // unit vectors relative to the centroids:
     {
         TPoint3D ct_other_pt(0, 0, 0), ct_this_pt(0, 0, 0);
 
@@ -367,8 +384,8 @@ void PointsPlanesICP::olae_match(
             ct_this_pt += TPoint3D(pair.this_x, pair.this_y, pair.this_z);
             ct_other_pt += TPoint3D(pair.other_x, pair.other_y, pair.other_z);
         }
-        ct_other_pt *= wPoints;
-        ct_this_pt *= wPoints;
+        ct_other_pt *= wcPoints;
+        ct_this_pt *= wcPoints;
 
         // Add plane centroids to the computation of centroids as well:
         TPoint3D ct_other_pl(0, 0, 0), ct_this_pl(0, 0, 0);
@@ -377,8 +394,8 @@ void PointsPlanesICP::olae_match(
             ct_this_pl += pair.p_this.centroid;
             ct_other_pl += pair.p_other.centroid;
         }
-        ct_this_pl *= wPlanes;
-        ct_other_pl *= wPlanes;
+        ct_this_pl *= wcPlanes;
+        ct_other_pl *= wcPlanes;
 
         // Normalize sum of centroids:
         ct_other = ct_other_pt + ct_other_pl;
@@ -386,7 +403,6 @@ void PointsPlanesICP::olae_match(
     }
 
     // Build the linear system: M g = v
-    MRPT_TODO("Pass weights! wPoints,...");
     const auto [M, v] = olae_build_linear_system(
         in, ct_other, ct_this, false /*dont relinearize singularity*/);
 
@@ -399,29 +415,17 @@ void PointsPlanesICP::olae_match(
     // Estimate |Phi|:
     const double estPhi1 = olae_estimate_Phi(Md, nAllMatches);
 
-    // Any threshold [90-180] degrees would work.
-    const bool do_relinearize = (estPhi1 > mrpt::DEG2RAD(178.0));
+    // Threshold to decide whether to do a re-linearization:
+    const bool do_relinearize = (estPhi1 > mrpt::DEG2RAD(150.0));
 
     if (do_relinearize)
     {
-        // std::cout << "|M|=" << Md << " estimated |Phi|=" <<
-        // mrpt::RAD2DEG(estPhi1) << "\n";
-
-        // relinearize on +180 degrees:
+        // relinearize on a different orientation:
         const auto [M2, v2] = olae_build_linear_system(
             in, ct_other, ct_this, true /*DO relinearize singularity*/);
 
-        // const double M2d     = M2.det();
-        // const double estPhi2 = olae_estimate_Phi(M2d, nAllMatches);
-
-        // std::cout << "|M2|=" << M2d << " estimated |Phi2|=" <<
-        // mrpt::RAD2DEG(estPhi2) << "\n";
-
         // Find the optimal Gibbs vector:
         optimal_rot = M2.colPivHouseholderQr().solve(v2);
-
-        // Undo the sequential rotation above:
-        optimal_rot = gibbs_rot_Z_90d_CCW(optimal_rot);
     }
     else
     {
@@ -444,9 +448,8 @@ void PointsPlanesICP::olae_match(
     // Undo transformation above:
     if (do_relinearize)
     {
-        result.optimal_pose = mrpt::poses::CPose3D(
-            0, 0, 0, M_PI + result.optimal_pose.yaw(),
-            -result.optimal_pose.pitch(), -result.optimal_pose.roll());
+        result.optimal_pose = result.optimal_pose +
+                              mrpt::poses::CPose3D(0, 0, 0, M_PI * 0.5, 0, 0);
     }
 
     // Use centroids to solve for optimal translation:
