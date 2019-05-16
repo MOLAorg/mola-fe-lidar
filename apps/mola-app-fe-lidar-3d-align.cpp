@@ -150,8 +150,16 @@ void do_scan_align_test()
             mrpt::gui::CDisplayWindow3DLocker lck(*win, scene);
 
             scene->clear();
+            // XYZ corner at origin (map 1)
             scene->insert(
-                mrpt::opengl::stock_objects::CornerXYZSimple(1.0f, 4.0f));
+                mrpt::opengl::stock_objects::CornerXYZSimple(1.0f, 6.0f));
+            // XYZ corner at aligned pose (map 2)
+            {
+                auto gl_corner2 =
+                    mrpt::opengl::stock_objects::CornerXYZSimple(1.0f, 3.0f);
+                gl_corner2->setPose(icp_out.found_pose_to_wrt_from.mean);
+                scene->insert(gl_corner2);
+            }
 
             auto gl_pc1 = mrpt::opengl::CSetOfObjects::Create();
             layer.second->renderOptions.color = mrpt::img::TColorf(1, 0, 0);
@@ -179,10 +187,6 @@ void do_scan_align_test()
 
     // Display "planes":
     {
-        // Plane width, plane freq for rendering:
-        const float pw = module.params_.voxel_filter_resolution * 0.5f;
-        const float pf = pw * 0.45f;
-
         const auto name = "planes"s;
 
         auto& win = wins[name] = mrpt::gui::CDisplayWindow3D::Create(name);
@@ -202,26 +206,29 @@ void do_scan_align_test()
         }
 #endif
 
-        for (const auto& plane : pcs1.pc.planes)
         {
-            auto gl_pl =
-                mrpt::opengl::CGridPlaneXY::Create(-pw, pw, -pw, pw, .0, pf);
-            gl_pl->setColor_u8(0xff, 0x00, 0x00);
-            mrpt::math::TPose3D planePose;
-            plane.plane.getAsPose3DForcingOrigin(plane.centroid, planePose);
-            gl_pl->setPose(planePose);
-            scene->insert(gl_pl);
+            p2p2::PointsPlanesICP::render_params_t pl1_render;
+            pl1_render.plane_color = mrpt::img::TColor(0xff, 0x00, 0x00);
+            pl1_render.plane_half_width =
+                module.params_.voxel_filter_resolution * 0.5f;
+            pl1_render.plane_grid_spacing = pl1_render.plane_half_width * 0.45f;
+
+            auto gl_planes1 = mrpt::opengl::CSetOfObjects::Create();
+            pcs1.pc.planesAsRenderizable(*gl_planes1, pl1_render);
+            scene->insert(gl_planes1);
         }
 
-        for (const auto& plane : pcs2.pc.planes)
         {
-            auto gl_pl =
-                mrpt::opengl::CGridPlaneXY::Create(-pw, pw, -pw, pw, .0, pf);
-            gl_pl->setColor_u8(0x00, 0x00, 0xff);
-            mrpt::math::TPose3D planePose;
-            plane.plane.getAsPose3DForcingOrigin(plane.centroid, planePose);
-            gl_pl->setPose(planePose);
-            scene->insert(gl_pl);
+            p2p2::PointsPlanesICP::render_params_t pl2_render;
+            pl2_render.plane_color = mrpt::img::TColor(0x00, 0x00, 0xff);
+            pl2_render.plane_half_width =
+                module.params_.voxel_filter_resolution * 0.5f;
+            pl2_render.plane_grid_spacing = pl2_render.plane_half_width * 0.45f;
+
+            auto gl_planes2 = mrpt::opengl::CSetOfObjects::Create();
+            pcs2.pc.planesAsRenderizable(*gl_planes2, pl2_render);
+            gl_planes2->setPose(icp_out.found_pose_to_wrt_from.mean);
+            scene->insert(gl_planes2);
         }
 
         auto msg = mrpt::format(
@@ -240,6 +247,29 @@ void do_scan_align_test()
                  " - found_pose_to_wrt_from:"
               << icp_out.found_pose_to_wrt_from.asString() << "\n"
               << " - goodness: " << icp_out.goodness << "\n";
+
+    // Evaluate with the raw point clouds:
+    {
+        // Matching params for point-to-point:
+        mrpt::maps::TMatchingParams mp;
+        mp.maxDistForCorrespondence        = 0.20f;
+        mp.maxAngularDistForCorrespondence = 0;
+        mp.onlyKeepTheClosest              = true;
+        mp.decimation_other_map_points     = 1;
+        mp.offset_other_map_points         = 0;
+
+        mrpt::tfest::TMatchingPairList    mpl;
+        mrpt::maps::TMatchingExtraResults mres;
+
+        pc1->determineMatching3D(
+            pc2.get(), icp_out.found_pose_to_wrt_from.mean, mpl, mp, mres);
+
+        std::cout << "Validation match against raw point cloud:\n Match ratio: "
+                  << mres.correspondencesRatio * 100 << "%\n"
+                  << " RMSE: " << std::sqrt(mres.sumSqrDist / mpl.size())
+                  << "\n"
+                  << " Number of matched points: " << mpl.size() << "\n";
+    }
 
     std::cout << "Close windows or hit a key on first window to quit.\n";
     if (!wins.empty()) wins.begin()->second->waitForKey();

@@ -11,9 +11,12 @@
  */
 #pragma once
 
+#include <mrpt/img/TColor.h>
 #include <mrpt/maps/CPointsMap.h>
+#include <mrpt/opengl/opengl_frwds.h>
 #include <mrpt/poses/CPose3D.h>
 #include <cstdint>
+#include <memory>
 #include "IterTermReason.h"
 #include "Parameters.h"
 #include "Results.h"
@@ -37,6 +40,14 @@ struct plane_patch_t
     }
 };
 
+struct render_params_t
+{
+    render_params_t() = default;
+
+    mrpt::img::TColor plane_color{0xff, 0xff, 0xff, 0xff};
+    double            plane_half_width{1.0}, plane_grid_spacing{0.25};
+};
+
 struct pointcloud_t
 {
     /** Different point layers, indexed by a descriptive name.
@@ -47,6 +58,12 @@ struct pointcloud_t
     std::map<std::string, mrpt::maps::CPointsMap::Ptr> point_layers;
     std::vector<mrpt::math::TLine3D>                   lines;
     std::vector<plane_patch_t>                         planes;
+
+    /** Gets a renderizable view of all planes. The target container `o` is not
+     * cleared(), clear() it manually if needed before calling. */
+    void planesAsRenderizable(
+        mrpt::opengl::CSetOfObjects& o,
+        const render_params_t&       p = render_params_t());
 };
 
 void align(
@@ -59,6 +76,12 @@ struct matched_plane_t
     /// \note "this"=global, "other"=local, while finding the transformation
     /// local wrt global
     plane_patch_t p_this, p_other;
+
+    matched_plane_t() = default;
+    matched_plane_t(const plane_patch_t& pl_this, const plane_patch_t& pl_other)
+        : p_this(pl_this), p_other(pl_other)
+    {
+    }
 };
 using TMatchedPlaneList = std::vector<matched_plane_t>;
 
