@@ -100,7 +100,7 @@ void do_scan_align_test()
         pcs2 = module.filterPointCloud(*pc2);
     }
 
-    // Send to ICP all layers except "raw":
+    // Send to ICP all layers except "raw" (makes a copy of pcs1/pcs2)
     mola::LidarOdometry3D::ICP_Input icp_in;
     icp_in.to_pc   = mola::LidarOdometry3D::lidar_scan_t::Create(pcs2);
     icp_in.from_pc = mola::LidarOdometry3D::lidar_scan_t::Create(pcs1);

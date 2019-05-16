@@ -20,6 +20,7 @@
 #include <mola-kernel/yaml_helpers.h>
 #include <mrpt/config/CConfigFileMemory.h>
 #include <mrpt/core/initializer.h>
+#include <mrpt/maps/CPointsMapXYZI.h>
 #include <mrpt/maps/CSimplePointsMap.h>
 #include <mrpt/obs/CObservationComment.h>
 #include <mrpt/obs/CObservationPointCloud.h>
@@ -901,8 +902,10 @@ void LidarOdometry3D::run_one_icp(const ICP_Input& in, ICP_Output& out)
                 "MRPT ICP: max point count=" << largest_pc_count
                                              << " decimation=" << decim);
 
-            p2p2::Parameters icp_params                = in.icp_params[stage];
-            icp_params.corresponding_points_decimation = decim;
+            p2p2::Parameters icp_params = in.icp_params[stage];
+            // icp_params.corresponding_points_decimation = decim;
+            icp_params.max_corresponding_points =
+                params_.decimate_to_point_count;
 
             p2p2::Results icp_result;
             p2p2::PointsPlanesICP::align(
@@ -1096,11 +1099,21 @@ LidarOdometry3D::lidar_scan_t LidarOdometry3D::filterPointCloud(
 
     auto& pc_edges           = scan.pc.point_layers["edges"];
     auto& pc_plane_centroids = scan.pc.point_layers["plane_centroids"];
-    auto& planes             = scan.pc.planes;
+    auto& pc_color_dark      = scan.pc.point_layers["color_dark"];
+    auto& pc_color_bright    = scan.pc.point_layers["color_bright"];
+    // auto& pc_full_decim      = scan.pc.point_layers["full_decim"];
+    auto& planes = scan.pc.planes;
+
+    auto pc_xyzi = dynamic_cast<const mrpt::maps::CPointsMapXYZI*>(&pc);
 
     pc_edges           = mrpt::maps::CSimplePointsMap::Create();
     pc_plane_centroids = mrpt::maps::CSimplePointsMap::Create();
+    pc_color_dark      = mrpt::maps::CSimplePointsMap::Create();
+    pc_color_bright    = mrpt::maps::CSimplePointsMap::Create();
+
+    // pc_full_decim      = mrpt::maps::CSimplePointsMap::Create();
     pc_edges->reserve(pc.size() / 10);
+    // pc_full_decim->reserve(pc.size() / params_.full_pointcloud_decimation);
     planes.reserve(pc.size() / 1000);
     pc_plane_centroids->reserve(pc.size() / 1000);
 
@@ -1161,17 +1174,34 @@ LidarOdometry3D::lidar_scan_t LidarOdometry3D::filterPointCloud(
 
         const float e0 = eig_vals[0], e1 = eig_vals[1], e2 = eig_vals[2];
 
+        bool add_to_full_decim = false;
+
         if (e2 < max_e20 * e0 && e1 < max_e10 * e0)
         {
             // Classified as EDGE
             // ------------------------
             nEdgeVoxels++;
-            for (size_t i = 0; i < vxl_pts.indices.size();
-                 i += params_.voxel_filter_decimation)
+            for (size_t i = 0; i < vxl_pts.indices.size(); i++)
             {
                 const auto pt_idx = vxl_pts.indices[i];
-                pc_edges->insertPointFast(xs[pt_idx], ys[pt_idx], zs[pt_idx]);
+                const auto ptx = xs[pt_idx], pty = ys[pt_idx], ptz = zs[pt_idx];
+
+                if ((i % params_.voxel_filter_decimation) == 1)
+                    pc_edges->insertPointFast(ptx, pty, ptz);
+
+                if (pc_xyzi)
+                {
+                    MRPT_TODO("Dynamic thresholds?");
+                    const float pt_int =
+                        pc_xyzi->getPointIntensity_fast(pt_idx);
+                    if (pt_int < 0.05f)
+                        pc_color_dark->insertPointFast(ptx, pty, ptz);
+                    if (pt_int > 0.85f)
+                        pc_color_bright->insertPointFast(ptx, pty, ptz);
+                }
             }
+
+            // Classified as color too?
         }
         else if (e2 > min_e20 * e0 && e1 > min_e10 * e0)
         {
@@ -1212,7 +1242,25 @@ LidarOdometry3D::lidar_scan_t LidarOdometry3D::filterPointCloud(
                 "[VoxelGridFilter] Detected plane with "
                 << vxl_pts.indices.size() << " pts.");
 #endif
+
+            // Now, check whether this is a ground plane, NOT to add it to the
+            // "full scan decimated" layer: A plane on the ground has its 0'th
+            // eigenvector like [0 0 1]
+            add_to_full_decim = (std::abs(ev0.z()) < 0.9f);
         }
+
+#if 0
+        if (add_to_full_decim)
+        {
+            for (size_t i = 0; i < vxl_pts.indices.size();
+                 i += params_.full_pointcloud_decimation)
+            {
+                const auto pt_idx = vxl_pts.indices[i];
+                pc_full_decim->insertPointFast(
+                    xs[pt_idx], ys[pt_idx], zs[pt_idx]);
+            }
+        }
+#endif
     }
     MRPT_LOG_DEBUG_STREAM(
         "[VoxelGridFilter] Voxel counts: total=" << nTotalVoxels

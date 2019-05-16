@@ -48,7 +48,6 @@ void PointsPlanesICP::align(
     mp.maxAngularDistForCorrespondence = p.thresholdAng;
     mp.onlyKeepTheClosest              = true;
     mp.onlyUniqueRobust                = false;
-    mp.decimation_other_map_points     = p.corresponding_points_decimation;
 
     // For decimation: cycle through all possible points, even if we decimate
     // them, in such a way that different points are used in each iteration.
@@ -102,6 +101,11 @@ void PointsPlanesICP::align(
 
             const bool is_layer_of_planes = (kv1.first == "plane_centroids"s);
 
+            // Decimation rate:
+            mp.decimation_other_map_points = std::max(
+                1U,
+                static_cast<unsigned>(m1->size() / p.max_corresponding_points));
+
             // Find closest pairings
             mrpt::tfest::TMatchingPairList mpl;
             m1->determineMatching3D(
@@ -139,7 +143,8 @@ void PointsPlanesICP::align(
                     const double n2n_ang = std::acos(dp);
 
                     // 2) append to list of plane pairs:
-                    if (n2n_ang < mrpt::DEG2RAD(5.0))
+                    MRPT_TODO("planes disabled here!");
+                    if (n2n_ang < 0)  // mrpt::DEG2RAD(5.0))
                     {
                         // Accept pairing:
                         pairings.paired_planes.emplace_back(p1, p2);
@@ -166,9 +171,9 @@ void PointsPlanesICP::align(
         OLAE_Match_Result res;
 
         // Weights: translation => trust points; attitude => trust planes
-        pairings.weights.translation.planes = 0.001;
+        pairings.weights.translation.planes = 0.0;
         pairings.weights.translation.points = 1.0;
-        pairings.weights.attitude.planes    = 1.0;
+        pairings.weights.attitude.planes    = 0.2;
         pairings.weights.attitude.points    = 1.0;
 
         olae_match(pairings, res);
@@ -190,8 +195,8 @@ void PointsPlanesICP::align(
         }
 
         // Shuffle decimated points for next iter:
-        if (++mp.offset_other_map_points >= p.corresponding_points_decimation)
-            mp.offset_other_map_points = 0;
+        // if (++mp.offset_other_map_points >=
+        // p.corresponding_points_decimation) mp.offset_other_map_points = 0;
 
         prev_solution = solution;
     }
@@ -251,6 +256,9 @@ static std::tuple<Eigen::Matrix3d, Eigen::Vector3d> olae_build_linear_system(
         waPlanes     = wPl * k;
     }
 
+    // Accumulator of robust kernel terms to normalize at the end:
+    double robust_w_sum = .0;
+
     // Terms contributed by points & vectors have now the uniform form of
     // unit vectors:
 
@@ -274,7 +282,6 @@ static std::tuple<Eigen::Matrix3d, Eigen::Vector3d> olae_build_linear_system(
             ASSERT_(ri_n > 1e-3);
             // (Note: ideally, both norms should be equal if noiseless and a
             // real pairing )
-
             bi *= 1.0 / bi_n;
             ri *= 1.0 / ri_n;
         }
@@ -309,7 +316,20 @@ static std::tuple<Eigen::Matrix3d, Eigen::Vector3d> olae_build_linear_system(
             ri = vector_rot_Z_90d_CCW(ri);
         }
 
+        // Robust kernel:
+        if (in.use_robust_kernel)
+        {
+            const double A = in.robust_kernel_param;
+            const double B = in.robust_kernel_scale;
+            const double ang =
+                std::acos(ri.x * bi.x + ri.y * bi.y + ri.z * bi.z);
+            double f = 1.0;
+            if (ang > A) f = 1.0 / (1.0 + B * mrpt::square(ang - A));
+            wi *= f;
+        }
+
         ASSERT_(wi > .0);
+        robust_w_sum += wi;
 
         // M+=(1/2)* ([s_i]_{x})^2
         // with: s_i = b_i + r_i
@@ -358,6 +378,12 @@ static std::tuple<Eigen::Matrix3d, Eigen::Vector3d> olae_build_linear_system(
 
         M += wi * dM;
         v -= wi * dV;
+    }
+
+    if (robust_w_sum)
+    {
+        M *= (1.0 / robust_w_sum);
+        v *= (1.0 / robust_w_sum);
     }
 
     // The missing (1/2) from the formulas above:
@@ -439,13 +465,16 @@ void PointsPlanesICP::olae_match(
 
         // Add plane centroids to the computation of centroids as well:
         TPoint3D ct_other_pl(0, 0, 0), ct_this_pl(0, 0, 0);
-        for (const auto& pair : in.paired_planes)
+        if (wcPlanes > 0)
         {
-            ct_this_pl += pair.p_this.centroid;
-            ct_other_pl += pair.p_other.centroid;
+            for (const auto& pair : in.paired_planes)
+            {
+                ct_this_pl += pair.p_this.centroid;
+                ct_other_pl += pair.p_other.centroid;
+            }
+            ct_this_pl *= wcPlanes;
+            ct_other_pl *= wcPlanes;
         }
-        ct_this_pl *= wcPlanes;
-        ct_other_pl *= wcPlanes;
 
         // Normalize sum of centroids:
         ct_other = ct_other_pt + ct_other_pl;

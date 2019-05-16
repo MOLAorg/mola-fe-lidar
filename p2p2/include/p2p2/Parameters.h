@@ -42,6 +42,8 @@ struct Parameters
      * one. The speed-up comes from a decimation of the number of KD-tree
      * queries, the most expensive step in ICP */
     uint32_t corresponding_points_decimation{5};
+
+    uint32_t max_corresponding_points{100000};
 };
 
 }  // namespace p2p2

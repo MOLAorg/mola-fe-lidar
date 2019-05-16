@@ -123,6 +123,9 @@ struct OLAE_Match_Input
         } translation;
     };
 
+    bool   use_robust_kernel{true};
+    double robust_kernel_param{mrpt::DEG2RAD(1.0)}, robust_kernel_scale{200.0};
+
     /// See docs for Weights
     Weights weights;
 
