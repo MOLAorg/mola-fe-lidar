@@ -48,7 +48,7 @@ void PointsPlanesICP::align(
     mp.maxAngularDistForCorrespondence = p.thresholdAng;
     mp.onlyKeepTheClosest              = true;
     mp.onlyUniqueRobust                = false;
-
+    mp.decimation_other_map_points     = p.corresponding_points_decimation;
     // For decimation: cycle through all possible points, even if we decimate
     // them, in such a way that different points are used in each iteration.
     mp.offset_other_map_points = 0;
@@ -68,6 +68,9 @@ void PointsPlanesICP::align(
     size_t pointcount1 = 0, pointcount2 = 0;
     for (const auto& kv1 : pcs1.point_layers)
     {
+        // Ignore this layer?
+        if (kv1.first == p.ignore_point_layer) continue;
+
         pointcount1 += kv1.second->size();
         pointcount2 += pcs2.point_layers.at(kv1.first)->size();
     }
@@ -99,12 +102,15 @@ void PointsPlanesICP::align(
             ASSERT_(m1);
             ASSERT_(m2);
 
+            // Ignore this layer?
+            if (kv1.first == p.ignore_point_layer) continue;
+
             const bool is_layer_of_planes = (kv1.first == "plane_centroids"s);
 
             // Decimation rate:
             mp.decimation_other_map_points = std::max(
-                1U,
-                static_cast<unsigned>(m1->size() / p.max_corresponding_points));
+                1U, static_cast<unsigned>(
+                        m1->size() / (1.0 * p.max_corresponding_points)));
 
             // Find closest pairings
             mrpt::tfest::TMatchingPairList mpl;
@@ -154,7 +160,7 @@ void PointsPlanesICP::align(
         }
 
         // Ratio of points with a valid pairing:
-        result.goodness = p.corresponding_points_decimation *
+        result.goodness = mp.decimation_other_map_points *
                           pairings.paired_points.size() /
                           static_cast<double>(pointcount1);
 
@@ -175,6 +181,8 @@ void PointsPlanesICP::align(
         pairings.weights.translation.points = 1.0;
         pairings.weights.attitude.planes    = 0.2;
         pairings.weights.attitude.points    = 1.0;
+
+        pairings.use_robust_kernel = p.use_kernel;
 
         olae_match(pairings, res);
 

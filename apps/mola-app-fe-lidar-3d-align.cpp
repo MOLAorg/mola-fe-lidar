@@ -46,6 +46,10 @@ static TCLAP::ValueArg<int> arg_icp_params_set(
     "2=loop-closure",
     true, 0, "0", cmd);
 
+static TCLAP::ValueArg<std::string> arg_init_pose(
+    "p", "pose-guess", "Initial guess for the relative pose", false,
+    "[0 0 0 0 0 0]", "(x,y,z [m] yaw pitch roll [deg])", cmd);
+
 static mrpt::system::CTimeLogger timlog;
 
 void do_scan_align_test()
@@ -100,14 +104,14 @@ void do_scan_align_test()
         pcs2 = module.filterPointCloud(*pc2);
     }
 
-    // Send to ICP all layers except "raw" (makes a copy of pcs1/pcs2)
+    // Add raw too:
+    pcs2.pc.point_layers["raw"] = pc2;
+    pcs1.pc.point_layers["raw"] = pc1;
+
+    // Send all layers to ICP
     mola::LidarOdometry3D::ICP_Input icp_in;
     icp_in.to_pc   = mola::LidarOdometry3D::lidar_scan_t::Create(pcs2);
     icp_in.from_pc = mola::LidarOdometry3D::lidar_scan_t::Create(pcs1);
-
-    // Add raw now, afterwards:
-    pcs2.pc.point_layers["raw"] = pc2;
-    pcs1.pc.point_layers["raw"] = pc1;
 
     // Select ICP configuration parameter set:
     switch (arg_icp_params_set.getValue())
@@ -127,6 +131,9 @@ void do_scan_align_test()
         default:
             throw std::invalid_argument("icp-params-set: invalid value.");
     }
+
+    // Set initial guess:
+    icp_in.init_guess_to_wrt_from.fromString(arg_init_pose.getValue());
 
     mola::LidarOdometry3D::ICP_Output icp_out;
     module.setVerbosityLevel(mrpt::system::LVL_DEBUG);
@@ -210,7 +217,7 @@ void do_scan_align_test()
             p2p2::PointsPlanesICP::render_params_t pl1_render;
             pl1_render.plane_color = mrpt::img::TColor(0xff, 0x00, 0x00);
             pl1_render.plane_half_width =
-                module.params_.voxel_filter_resolution * 0.5f;
+                module.params_.voxel_filter4planes_resolution * 0.5f;
             pl1_render.plane_grid_spacing = pl1_render.plane_half_width * 0.45f;
 
             auto gl_planes1 = mrpt::opengl::CSetOfObjects::Create();
@@ -222,7 +229,7 @@ void do_scan_align_test()
             p2p2::PointsPlanesICP::render_params_t pl2_render;
             pl2_render.plane_color = mrpt::img::TColor(0x00, 0x00, 0xff);
             pl2_render.plane_half_width =
-                module.params_.voxel_filter_resolution * 0.5f;
+                module.params_.voxel_filter4planes_resolution * 0.5f;
             pl2_render.plane_grid_spacing = pl2_render.plane_half_width * 0.45f;
 
             auto gl_planes2 = mrpt::opengl::CSetOfObjects::Create();

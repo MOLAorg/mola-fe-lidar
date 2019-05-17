@@ -66,13 +66,17 @@ class LidarOdometry3D : public FrontEndBase
          * number of points */
         unsigned int decimate_to_point_count{500};
 
-        /** Size of the voxel filter [meters] */
-        unsigned int full_pointcloud_decimation{20};
-        double       voxel_filter_resolution{.5};
-        unsigned int voxel_filter_decimation{1};
-        unsigned int voxel_filter_min_point_count{20};
-        float        voxel_filter_max_e2_e0{30.f}, voxel_filter_max_e1_e0{30.f};
-        float voxel_filter_min_e2_e0{100.f}, voxel_filter_min_e1_e0{100.f};
+        /** Params for the voxel filters */
+        double       voxel_filter4planes_resolution{2.};
+        unsigned int voxel_filter4planes_min_point_count{20};
+        float        voxel_filter4planes_min_e1_e0{100.f};
+        float        voxel_filter4planes_min_e2_e0{100.f};
+
+        double       voxel_filter4edges_resolution{.5};
+        unsigned int voxel_filter4edges_decimation{1};
+        unsigned int voxel_filter4edges_min_point_count{20};
+        float        voxel_filter4edges_max_e1_e0{10.f};
+        float        voxel_filter4edges_min_e2_e1{10.f};
 
         /** Distance range to check for additional SE(3) edges */
         double       min_dist_to_matching{6.0};
@@ -168,7 +172,8 @@ class LidarOdometry3D : public FrontEndBase
         bool                        last_iter_twist_is_good{false};
         id_t                        last_kf{mola::INVALID_ID};
         mrpt::poses::CPose3D        accum_since_last_kf{};
-        p2p2::PointCloudToVoxelGrid filter_grid;
+        p2p2::PointCloudToVoxelGrid filter_grid4planes;
+        p2p2::PointCloudToVoxelGrid filter_grid4edges;
 
         // An auxiliary (local) pose-graph to use Dijkstra and find guesses
         // for ICP against nearby past KFs:

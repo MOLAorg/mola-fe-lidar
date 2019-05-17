@@ -97,6 +97,10 @@ static void load_icp_set_of_params(
     ASSERTMSG_(cfg[sName], "Missing YAML required entry: `"s + sName + "`"s);
     std::string thresholdAngs = cfg[sName].as<std::string>("");
 
+    sName = prefix + "useRobustKernel"s;
+    ASSERTMSG_(cfg[sName], "Missing YAML required entry: `"s + sName + "`"s);
+    std::string useKernel = cfg[sName].as<std::string>("");
+
     // Vector -> values:
     std::vector<std::string> maxIterations_vals;
     mrpt::system::tokenize(maxIterations, " ,", maxIterations_vals);
@@ -107,9 +111,13 @@ static void load_icp_set_of_params(
     std::vector<std::string> thresholdAngs_vals;
     mrpt::system::tokenize(thresholdAngs, " ,", thresholdAngs_vals);
 
+    std::vector<std::string> useKernel_vals;
+    mrpt::system::tokenize(useKernel, " ,", useKernel_vals);
+
     ASSERT_(maxIterations_vals.size() >= 1);
     ASSERT_(maxIterations_vals.size() == thresholdDists_vals.size());
     ASSERT_(maxIterations_vals.size() == thresholdAngs_vals.size());
+    ASSERT_(maxIterations_vals.size() == useKernel_vals.size());
 
     const size_t n = thresholdAngs_vals.size();
     out.resize(n);
@@ -118,6 +126,7 @@ static void load_icp_set_of_params(
         out[i].maxIterations = std::stoul(maxIterations_vals[i]);
         out[i].thresholdDist = std::stod(thresholdDists_vals[i]);
         out[i].thresholdAng  = mrpt::DEG2RAD(std::stod(thresholdAngs_vals[i]));
+        out[i].use_kernel    = (std::stoul(useKernel_vals[i]) != 0);
     }
 }
 
@@ -137,14 +146,17 @@ void LidarOdometry3D::initialize(const std::string& cfg_block)
     YAML_LOAD_OPT(params_, min_icp_goodness, double);
     YAML_LOAD_OPT(params_, min_icp_goodness_lc, double);
     YAML_LOAD_OPT(params_, decimate_to_point_count, unsigned int);
-    YAML_LOAD_OPT(params_, voxel_filter_resolution, double);
-    YAML_LOAD_OPT(params_, voxel_filter_decimation, unsigned int);
-    YAML_LOAD_OPT(params_, voxel_filter_min_point_count, unsigned int);
-    YAML_LOAD_OPT(params_, full_pointcloud_decimation, unsigned int);
-    YAML_LOAD_OPT(params_, voxel_filter_max_e2_e0, float);
-    YAML_LOAD_OPT(params_, voxel_filter_max_e1_e0, float);
-    YAML_LOAD_OPT(params_, voxel_filter_min_e2_e0, float);
-    YAML_LOAD_OPT(params_, voxel_filter_min_e1_e0, float);
+
+    YAML_LOAD_OPT(params_, voxel_filter4planes_resolution, double);
+    YAML_LOAD_OPT(params_, voxel_filter4planes_min_point_count, unsigned int);
+    YAML_LOAD_OPT(params_, voxel_filter4planes_min_e1_e0, float);
+    YAML_LOAD_OPT(params_, voxel_filter4planes_min_e2_e0, float);
+
+    YAML_LOAD_OPT(params_, voxel_filter4edges_resolution, double);
+    YAML_LOAD_OPT(params_, voxel_filter4edges_min_point_count, unsigned int);
+    YAML_LOAD_OPT(params_, voxel_filter4edges_max_e1_e0, float);
+    YAML_LOAD_OPT(params_, voxel_filter4edges_min_e2_e1, float);
+    YAML_LOAD_OPT(params_, voxel_filter4edges_decimation, unsigned int);
 
     YAML_LOAD_OPT(params_, min_dist_to_matching, double);
     YAML_LOAD_OPT(params_, max_dist_to_matching, double);
@@ -169,9 +181,13 @@ void LidarOdometry3D::initialize(const std::string& cfg_block)
 
     {
         ProfilerEntry tle(profiler_, "filterPointCloud_initialize");
-        state_.filter_grid.resize(
+        state_.filter_grid4planes.resize(
             {-50.0, -50.0, -10.0}, {50.0, 50.0, 10.0},
-            params_.voxel_filter_resolution);
+            params_.voxel_filter4planes_resolution);
+
+        state_.filter_grid4edges.resize(
+            {-50.0, -50.0, -10.0}, {50.0, 50.0, 10.0},
+            params_.voxel_filter4edges_resolution);
     }
 
     // attach to world model, if present:
@@ -262,8 +278,8 @@ void LidarOdometry3D::doProcessNewObservation(CObservation::Ptr& o)
                     profiler_, "doProcessNewObservation.2.filter_pointclouds");
                 *this_obs_points = filterPointCloud(*raw_pc);
             }
-            // We don't keep the original, full-res point cloud to save
-            // memory. raw_pc will be freed as it goes out of scope here.
+
+            this_obs_points->pc.point_layers["raw"] = raw_pc;
         }
 
         profiler_.enter("doProcessNewObservation.2b.copy_vars");
@@ -903,9 +919,10 @@ void LidarOdometry3D::run_one_icp(const ICP_Input& in, ICP_Output& out)
                                              << " decimation=" << decim);
 
             p2p2::Parameters icp_params = in.icp_params[stage];
-            // icp_params.corresponding_points_decimation = decim;
             icp_params.max_corresponding_points =
                 params_.decimate_to_point_count;
+
+            icp_params.ignore_point_layer = "raw"s;
 
             p2p2::Results icp_result;
             p2p2::PointsPlanesICP::align(
@@ -924,6 +941,42 @@ void LidarOdometry3D::run_one_icp(const ICP_Input& in, ICP_Output& out)
                 "ICP stage #%u (kind=%u): goodness=%.03f iters=%u rel_pose=%s "
                 "termReason=%u",
                 stage, static_cast<unsigned int>(in.align_kind), out.goodness,
+                static_cast<unsigned int>(icp_result.nIterations),
+                out.found_pose_to_wrt_from.getMeanVal().asString().c_str(),
+                static_cast<unsigned int>(icp_result.terminationReason));
+        }
+
+        // After all user-provided stages, run one single extra pass with the
+        // "raw" points layer, now that we should be really close to the optimal
+        // alignment:
+        {
+            p2p2::Parameters icp_params;
+            icp_params.max_corresponding_points =
+                params_.decimate_to_point_count;
+            // icp_params.max_corresponding_points = 100;
+            icp_params.thresholdAng  = 0;
+            icp_params.thresholdDist = 0.1f;
+            icp_params.maxIterations = in.icp_params.back().maxIterations;
+
+            p2p2::PointsPlanesICP::pointcloud_t pcs1, pcs2;
+            pcs1.point_layers["raw"] = pcs_from.point_layers.at("raw");
+            pcs2.point_layers["raw"] = pcs_to.point_layers.at("raw");
+            icp_params.ignore_point_layer.clear();
+
+            p2p2::Results icp_result;
+            p2p2::PointsPlanesICP::align(
+                pcs_from, pcs_to, current_solution, icp_params, icp_result);
+
+            if (icp_result.goodness > 0)
+                current_solution = icp_result.optimal_tf.mean.asTPose();
+
+            out.found_pose_to_wrt_from = icp_result.optimal_tf;
+            // No: out.goodness
+
+            MRPT_LOG_DEBUG_FMT(
+                "ICP final pass (kind=%u): goodness=%.03f iters=%u rel_pose=%s "
+                "termReason=%u",
+                static_cast<unsigned int>(in.align_kind), out.goodness,
                 static_cast<unsigned int>(icp_result.nIterations),
                 out.found_pose_to_wrt_from.getMeanVal().asString().c_str(),
                 static_cast<unsigned int>(icp_result.terminationReason));
@@ -1090,103 +1143,108 @@ void LidarOdometry3D::run_one_icp(const ICP_Input& in, ICP_Output& out)
     MRPT_END
 }
 
+template <typename VEC>
+static void pointcloud_centroid_covariance(
+    const VEC& xs, const VEC& ys, const VEC& zs,
+    const p2p2::PointCloudToVoxelGrid::voxel_t& vxl_pts,
+    mrpt::math::TPoint3Df& mean, Eigen::Matrix3f& cov)
+{
+    mean              = mrpt::math::TPoint3Df(0, 0, 0);
+    const float inv_n = (1.0f / vxl_pts.indices.size());
+    for (size_t i = 0; i < vxl_pts.indices.size(); i++)
+    {
+        const auto pt_idx = vxl_pts.indices[i];
+        mean.x += xs[pt_idx];
+        mean.y += ys[pt_idx];
+        mean.z += zs[pt_idx];
+    }
+    mean.x *= inv_n;
+    mean.y *= inv_n;
+    mean.z *= inv_n;
+
+    cov.setZero();
+    for (size_t i = 0; i < vxl_pts.indices.size(); i++)
+    {
+        const auto                  pt_idx = vxl_pts.indices[i];
+        const mrpt::math::TPoint3Df a(
+            xs[pt_idx] - mean.x, ys[pt_idx] - mean.y, zs[pt_idx] - mean.z);
+        cov(0, 0) += a.x * a.x;
+        cov(1, 0) += a.x * a.y;
+        cov(2, 0) += a.x * a.z;
+        cov(1, 1) += a.y * a.y;
+        cov(2, 1) += a.y * a.z;
+        cov(2, 2) += a.z * a.z;
+    }
+    cov *= inv_n;
+}
+
 LidarOdometry3D::lidar_scan_t LidarOdometry3D::filterPointCloud(
     const mrpt::maps::CPointsMap& pc)
 {
     MRPT_START
 
+    // The result:
     lidar_scan_t scan;
 
     auto& pc_edges           = scan.pc.point_layers["edges"];
     auto& pc_plane_centroids = scan.pc.point_layers["plane_centroids"];
-    auto& pc_color_dark      = scan.pc.point_layers["color_dark"];
     auto& pc_color_bright    = scan.pc.point_layers["color_bright"];
-    // auto& pc_full_decim      = scan.pc.point_layers["full_decim"];
-    auto& planes = scan.pc.planes;
+    auto& planes             = scan.pc.planes;
 
     auto pc_xyzi = dynamic_cast<const mrpt::maps::CPointsMapXYZI*>(&pc);
 
     pc_edges           = mrpt::maps::CSimplePointsMap::Create();
     pc_plane_centroids = mrpt::maps::CSimplePointsMap::Create();
-    pc_color_dark      = mrpt::maps::CSimplePointsMap::Create();
     pc_color_bright    = mrpt::maps::CSimplePointsMap::Create();
 
-    // pc_full_decim      = mrpt::maps::CSimplePointsMap::Create();
     pc_edges->reserve(pc.size() / 10);
-    // pc_full_decim->reserve(pc.size() / params_.full_pointcloud_decimation);
     planes.reserve(pc.size() / 1000);
     pc_plane_centroids->reserve(pc.size() / 1000);
 
-    state_.filter_grid.clear();
-    state_.filter_grid.processPointCloud(pc);
+    state_.filter_grid4edges.clear();
+    state_.filter_grid4edges.processPointCloud(pc);
+
+    state_.filter_grid4planes.clear();
+    state_.filter_grid4planes.processPointCloud(pc);
 
     const auto& xs = pc.getPointsBufferRef_x();
     const auto& ys = pc.getPointsBufferRef_y();
     const auto& zs = pc.getPointsBufferRef_z();
 
-    const float max_e20 = params_.voxel_filter_max_e2_e0;
-    const float max_e10 = params_.voxel_filter_max_e1_e0;
-    const float min_e20 = params_.voxel_filter_min_e2_e0;
-    const float min_e10 = params_.voxel_filter_min_e1_e0;
-
-    std::size_t nEdgeVoxels = 0, nPlaneVoxels = 0, nTotalVoxels = 0;
-    for (const auto& vxl_pts : state_.filter_grid.pts_voxels)
+    std::size_t nEdgeVoxels = 0, nPlaneVoxels = 0;
+    for (const auto vxl_idx : state_.filter_grid4edges.used_voxel_indices)
     {
-        if (!vxl_pts.indices.empty()) nTotalVoxels++;
-        if (vxl_pts.indices.size() < params_.voxel_filter_min_point_count)
+        const auto& vxl_pts =
+            state_.filter_grid4edges.pts_voxels.cellByIndex(vxl_idx);
+
+        if (vxl_pts->indices.size() <
+            params_.voxel_filter4edges_min_point_count)
             continue;
 
         // Analyze the voxel contents:
-        mrpt::math::TPoint3Df mean{0, 0, 0};
-        const float           inv_n = (1.0f / vxl_pts.indices.size());
-        for (size_t i = 0; i < vxl_pts.indices.size(); i++)
-        {
-            const auto pt_idx = vxl_pts.indices[i];
-            mean.x += xs[pt_idx];
-            mean.y += ys[pt_idx];
-            mean.z += zs[pt_idx];
-        }
-        mean.x *= inv_n;
-        mean.y *= inv_n;
-        mean.z *= inv_n;
-
-        Eigen::Matrix3f mat_a;
-        mat_a.setZero();
-        for (size_t i = 0; i < vxl_pts.indices.size(); i++)
-        {
-            const auto                  pt_idx = vxl_pts.indices[i];
-            const mrpt::math::TPoint3Df a(
-                xs[pt_idx] - mean.x, ys[pt_idx] - mean.y, zs[pt_idx] - mean.z);
-            mat_a(0, 0) += a.x * a.x;
-            mat_a(1, 0) += a.x * a.y;
-            mat_a(2, 0) += a.x * a.z;
-            mat_a(1, 1) += a.y * a.y;
-            mat_a(2, 1) += a.y * a.z;
-            mat_a(2, 2) += a.z * a.z;
-        }
-        mat_a *= inv_n;
+        mrpt::math::TPoint3Df mean;
+        Eigen::Matrix3f       cov;
+        pointcloud_centroid_covariance(xs, ys, zs, *vxl_pts, mean, cov);
 
         // This only looks at the lower-triangular part of the cov
-        // matrix (which is wrong in loam_velodyne!)
-        Eigen::SelfAdjointEigenSolver<Eigen::Matrix3f> esolver(mat_a);
+        // matrix (which is(was->fixed via PR) wrong in loam_velodyne!)
+        Eigen::SelfAdjointEigenSolver<Eigen::Matrix3f> esolver(cov);
 
         const Eigen::Vector3f eig_vals = esolver.eigenvalues();
-
         const float e0 = eig_vals[0], e1 = eig_vals[1], e2 = eig_vals[2];
 
-        bool add_to_full_decim = false;
-
-        if (e2 < max_e20 * e0 && e1 < max_e10 * e0)
+        if (e2 > params_.voxel_filter4edges_min_e2_e1 * e1 &&
+            e1 < params_.voxel_filter4edges_max_e1_e0 * e0)
         {
             // Classified as EDGE
             // ------------------------
             nEdgeVoxels++;
-            for (size_t i = 0; i < vxl_pts.indices.size(); i++)
+            for (size_t i = 0; i < vxl_pts->indices.size(); i++)
             {
-                const auto pt_idx = vxl_pts.indices[i];
+                const auto pt_idx = vxl_pts->indices[i];
                 const auto ptx = xs[pt_idx], pty = ys[pt_idx], ptz = zs[pt_idx];
 
-                if ((i % params_.voxel_filter_decimation) == 1)
+                if ((i % params_.voxel_filter4edges_decimation) == 0)
                     pc_edges->insertPointFast(ptx, pty, ptz);
 
                 if (pc_xyzi)
@@ -1194,16 +1252,38 @@ LidarOdometry3D::lidar_scan_t LidarOdometry3D::filterPointCloud(
                     MRPT_TODO("Dynamic thresholds?");
                     const float pt_int =
                         pc_xyzi->getPointIntensity_fast(pt_idx);
-                    if (pt_int < 0.05f)
-                        pc_color_dark->insertPointFast(ptx, pty, ptz);
-                    if (pt_int > 0.85f)
+                    if (pt_int > 0.75f)
                         pc_color_bright->insertPointFast(ptx, pty, ptz);
                 }
             }
-
-            // Classified as color too?
         }
-        else if (e2 > min_e20 * e0 && e1 > min_e10 * e0)
+    }  // end for each voxel
+
+    // Planes:
+    for (const auto vxl_idx : state_.filter_grid4planes.used_voxel_indices)
+    {
+        const auto& vxl_pts =
+            state_.filter_grid4planes.pts_voxels.cellByIndex(vxl_idx);
+
+        if (vxl_pts->indices.size() <
+            params_.voxel_filter4planes_min_point_count)
+            continue;
+
+        // Analyze the voxel contents:
+        mrpt::math::TPoint3Df mean;
+        Eigen::Matrix3f       cov;
+        pointcloud_centroid_covariance(xs, ys, zs, *vxl_pts, mean, cov);
+
+        // This only looks at the lower-triangular part of the cov
+        // matrix (which is(was->fixed via PR) wrong in loam_velodyne!)
+        Eigen::SelfAdjointEigenSolver<Eigen::Matrix3f> esolver(cov);
+
+        const Eigen::Vector3f eig_vals = esolver.eigenvalues();
+        // The eigenvalues are sorted in increasing order.
+        const float e0 = eig_vals[0], e1 = eig_vals[1], e2 = eig_vals[2];
+
+        if (e1 > params_.voxel_filter4planes_min_e1_e0 * e0 &&
+            e2 > params_.voxel_filter4planes_min_e2_e0 * e0)
         {
             // Classified as PLANE
             // ------------------------
@@ -1237,35 +1317,13 @@ LidarOdometry3D::lidar_scan_t LidarOdometry3D::filterPointCloud(
 
             // Also: add the centroid to this special layer:
             pc_plane_centroids->insertPoint(pl_c);
-#if 0
-            MRPT_LOG_INFO_STREAM(
-                "[VoxelGridFilter] Detected plane with "
-                << vxl_pts.indices.size() << " pts.");
-#endif
-
-            // Now, check whether this is a ground plane, NOT to add it to the
-            // "full scan decimated" layer: A plane on the ground has its 0'th
-            // eigenvector like [0 0 1]
-            add_to_full_decim = (std::abs(ev0.z()) < 0.9f);
         }
 
-#if 0
-        if (add_to_full_decim)
-        {
-            for (size_t i = 0; i < vxl_pts.indices.size();
-                 i += params_.full_pointcloud_decimation)
-            {
-                const auto pt_idx = vxl_pts.indices[i];
-                pc_full_decim->insertPointFast(
-                    xs[pt_idx], ys[pt_idx], zs[pt_idx]);
-            }
-        }
-#endif
-    }
+    }  // end for each voxel
+
     MRPT_LOG_DEBUG_STREAM(
-        "[VoxelGridFilter] Voxel counts: total=" << nTotalVoxels
-                                                 << " edges=" << nEdgeVoxels
-                                                 << " planes=" << nPlaneVoxels);
+        "[VoxelGridFilter] Voxel counts:\n"
+        << " edges=" << nEdgeVoxels << " planes=" << nPlaneVoxels);
 
     return scan;
 

@@ -125,9 +125,6 @@ void do_scan_segment_test()
     // Display "planes":
     {
         // Plane width, plane freq for rendering:
-        const float pw = module.params_.voxel_filter_resolution * 0.5f;
-        const float pf = pw * 0.45f;
-
         const auto name = "planes"s;
 
         auto& win = wins[name] = mrpt::gui::CDisplayWindow3D::Create(name);
@@ -137,7 +134,7 @@ void do_scan_segment_test()
         scene->clear();
         scene->insert(mrpt::opengl::stock_objects::CornerXYZSimple(1.0f, 4.0f));
 
-        // Overlay the raw points:
+        // Overlay raw points to planes:
         if (scan.pc.point_layers["raw"])
         {
             auto gl_pc = mrpt::opengl::CSetOfObjects::Create();
@@ -145,16 +142,11 @@ void do_scan_segment_test()
             scene->insert(gl_pc);
         }
 
-        for (const auto& plane : scan.pc.planes)
+        // Planes:
         {
-            auto gl_pl =
-                mrpt::opengl::CGridPlaneXY::Create(-pw, pw, -pw, pw, .0, pf);
-
-            mrpt::math::TPose3D planePose;
-            plane.plane.getAsPose3DForcingOrigin(plane.centroid, planePose);
-            gl_pl->setPose(planePose);
-
-            scene->insert(gl_pl);
+            auto gl_planes1 = mrpt::opengl::CSetOfObjects::Create();
+            scan.pc.planesAsRenderizable(*gl_planes1);
+            scene->insert(gl_planes1);
         }
 
         auto msg = mrpt::format(

@@ -33,6 +33,11 @@ class PointCloudToVoxelGrid
     /** The point indices in each voxel. Directly access to each desired cell,
      * use its iterator, etc. */
     grid_t pts_voxels;
+
+    std::vector<uint32_t> used_voxel_indices;
+
+   protected:
+    std::vector<bool> voxel_is_empty_;
 };
 
 }  // namespace p2p2

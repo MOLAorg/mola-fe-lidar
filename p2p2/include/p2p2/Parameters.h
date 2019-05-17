@@ -44,6 +44,8 @@ struct Parameters
     uint32_t corresponding_points_decimation{5};
 
     uint32_t max_corresponding_points{100000};
+
+    std::string ignore_point_layer{"raw"};
 };
 
 }  // namespace p2p2
