@@ -158,6 +158,8 @@ void LidarOdometry3D::initialize(const std::string& cfg_block)
     YAML_LOAD_OPT(params_, voxel_filter4edges_min_e2_e1, float);
     YAML_LOAD_OPT(params_, voxel_filter4edges_decimation, unsigned int);
 
+    YAML_LOAD_OPT(params_, raw_decimate_point_count, unsigned int);
+
     YAML_LOAD_OPT(params_, min_dist_to_matching, double);
     YAML_LOAD_OPT(params_, max_dist_to_matching, double);
     YAML_LOAD_OPT(params_, max_dist_to_loop_closure, double);
@@ -893,6 +895,14 @@ void LidarOdometry3D::run_one_icp(const ICP_Input& in, ICP_Output& out)
 
     MRPT_START
 
+    // A reference number for each ICP run, just to help identifying log
+    // messages from one single run when running in parallel threads.
+    static unsigned int run_id = 0;
+    static std::mutex   run_id_mx;
+    run_id_mx.lock();
+    const auto this_run_id = run_id++;
+    run_id_mx.unlock();
+
     {
         ProfilerEntry tle(profiler_, "run_one_icp");
 
@@ -938,10 +948,10 @@ void LidarOdometry3D::run_one_icp(const ICP_Input& in, ICP_Output& out)
             out.goodness               = icp_result.goodness;
 
             MRPT_LOG_DEBUG_FMT(
-                "ICP stage #%u (kind=%u): goodness=%.03f iters=%u rel_pose=%s "
-                "termReason=%u",
-                stage, static_cast<unsigned int>(in.align_kind), out.goodness,
-                static_cast<unsigned int>(icp_result.nIterations),
+                "[ICP run #%u] stage #%u (kind=%u): goodness=%.03f iters=%u "
+                "rel_pose=%s termReason=%u",
+                this_run_id, stage, static_cast<unsigned int>(in.align_kind),
+                out.goodness, static_cast<unsigned int>(icp_result.nIterations),
                 out.found_pose_to_wrt_from.getMeanVal().asString().c_str(),
                 static_cast<unsigned int>(icp_result.terminationReason));
         }
@@ -949,13 +959,13 @@ void LidarOdometry3D::run_one_icp(const ICP_Input& in, ICP_Output& out)
         // After all user-provided stages, run one single extra pass with the
         // "raw" points layer, now that we should be really close to the optimal
         // alignment:
+        if (0)
         {
             p2p2::Parameters icp_params;
             icp_params.max_corresponding_points =
                 params_.decimate_to_point_count;
-            // icp_params.max_corresponding_points = 100;
             icp_params.thresholdAng  = 0;
-            icp_params.thresholdDist = 0.1f;
+            icp_params.thresholdDist = in.icp_params.back().thresholdDist;
             icp_params.maxIterations = in.icp_params.back().maxIterations;
 
             p2p2::PointsPlanesICP::pointcloud_t pcs1, pcs2;
@@ -1189,6 +1199,7 @@ LidarOdometry3D::lidar_scan_t LidarOdometry3D::filterPointCloud(
     auto& pc_edges           = scan.pc.point_layers["edges"];
     auto& pc_plane_centroids = scan.pc.point_layers["plane_centroids"];
     auto& pc_color_bright    = scan.pc.point_layers["color_bright"];
+    auto& pc_raw_decim       = scan.pc.point_layers["raw_decim"];
     auto& planes             = scan.pc.planes;
 
     auto pc_xyzi = dynamic_cast<const mrpt::maps::CPointsMapXYZI*>(&pc);
@@ -1196,10 +1207,12 @@ LidarOdometry3D::lidar_scan_t LidarOdometry3D::filterPointCloud(
     pc_edges           = mrpt::maps::CSimplePointsMap::Create();
     pc_plane_centroids = mrpt::maps::CSimplePointsMap::Create();
     pc_color_bright    = mrpt::maps::CSimplePointsMap::Create();
+    pc_raw_decim       = mrpt::maps::CSimplePointsMap::Create();
 
     pc_edges->reserve(pc.size() / 10);
     planes.reserve(pc.size() / 1000);
     pc_plane_centroids->reserve(pc.size() / 1000);
+    pc_raw_decim->reserve(params_.raw_decimate_point_count + 1000);
 
     state_.filter_grid4edges.clear();
     state_.filter_grid4edges.processPointCloud(pc);
@@ -1316,10 +1329,26 @@ LidarOdometry3D::lidar_scan_t LidarOdometry3D::filterPointCloud(
             planes.emplace_back(pl, pl_c);
 
             // Also: add the centroid to this special layer:
-            pc_plane_centroids->insertPoint(pl_c);
+            pc_plane_centroids->insertPointFast(pl_c.x, pl_c.y, pl_c.z);
         }
 
     }  // end for each voxel
+
+    // Decimation of the entire raw input point cloud:
+    const auto        nRawPts         = xs.size();
+    const std::size_t decim_raw_ratio = std::max(
+        static_cast<std::size_t>(1),
+        nRawPts / params_.raw_decimate_point_count);
+
+    for (std::size_t i = 0; i < nRawPts; i += decim_raw_ratio)
+        pc_raw_decim->insertPointFast(xs[i], ys[i], zs[i]);
+
+    // Mark all pcs as "modified" (to rebuild the kd-trees, etc.), since we used
+    // the "fast" insert methods above:
+    pc_color_bright->mark_as_modified();
+    pc_edges->mark_as_modified();
+    pc_plane_centroids->mark_as_modified();
+    pc_raw_decim->mark_as_modified();
 
     MRPT_LOG_DEBUG_STREAM(
         "[VoxelGridFilter] Voxel counts:\n"

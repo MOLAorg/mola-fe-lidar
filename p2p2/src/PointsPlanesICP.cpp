@@ -58,9 +58,9 @@ void PointsPlanesICP::align(
     // Distance threshold
     mp_planes.maxDistForCorrespondence =
         p.thresholdDist +
-        1.0 /* since plane centroids must not show up at the same location */;
+        2.0 /* since plane centroids must not show up at the same location */;
     // Angular threshold
-    mp_planes.maxAngularDistForCorrespondence = p.thresholdAng;
+    mp_planes.maxAngularDistForCorrespondence = 0.;
     mp_planes.onlyKeepTheClosest              = true;
     mp_planes.decimation_other_map_points     = 1;
 
@@ -149,8 +149,8 @@ void PointsPlanesICP::align(
                     const double n2n_ang = std::acos(dp);
 
                     // 2) append to list of plane pairs:
-                    MRPT_TODO("planes disabled here!");
-                    if (n2n_ang < 0)  // mrpt::DEG2RAD(5.0))
+                    MRPT_TODO("Set threshold parameter");
+                    if (n2n_ang < mrpt::DEG2RAD(5.0))
                     {
                         // Accept pairing:
                         pairings.paired_planes.emplace_back(p1, p2);
@@ -159,15 +159,11 @@ void PointsPlanesICP::align(
             }
         }
 
-        // Ratio of points with a valid pairing:
-        result.goodness = mp.decimation_other_map_points *
-                          pairings.paired_points.size() /
-                          static_cast<double>(pointcount1);
-
         if (pairings.empty())
         {
             // Nothing we can do !!
             result.terminationReason = IterTermReason::NoPairings;
+            result.goodness          = 0;
             break;
         }
 
@@ -179,7 +175,7 @@ void PointsPlanesICP::align(
         // Weights: translation => trust points; attitude => trust planes
         pairings.weights.translation.planes = 0.0;
         pairings.weights.translation.points = 1.0;
-        pairings.weights.attitude.planes    = 0.2;
+        pairings.weights.attitude.planes    = 10.0;
         pairings.weights.attitude.points    = 1.0;
 
         pairings.use_robust_kernel = p.use_kernel;
@@ -211,6 +207,22 @@ void PointsPlanesICP::align(
 
     if (result.nIterations >= p.maxIterations)
         result.terminationReason = IterTermReason::MaxIterations;
+
+    // Ratio of points with a valid pairing:
+    // Evaluate with the raw point clouds:
+    {
+        // Matching params for point-to-point:
+        // Reuse those of the last stage, stored in "mp" above.
+        mp.decimation_other_map_points = 100;
+
+        mrpt::tfest::TMatchingPairList    mpl;
+        mrpt::maps::TMatchingExtraResults mres;
+
+        pcs1.point_layers.at("raw")->determineMatching3D(
+            pcs2.point_layers.at("raw").get(), solution, mpl, mp, mres);
+
+        result.goodness = mres.correspondencesRatio;
+    }
 
     // Store output:
     result.optimal_tf.mean = solution;

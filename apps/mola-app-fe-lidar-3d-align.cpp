@@ -255,29 +255,6 @@ void do_scan_align_test()
               << icp_out.found_pose_to_wrt_from.asString() << "\n"
               << " - goodness: " << icp_out.goodness << "\n";
 
-    // Evaluate with the raw point clouds:
-    {
-        // Matching params for point-to-point:
-        mrpt::maps::TMatchingParams mp;
-        mp.maxDistForCorrespondence        = 0.20f;
-        mp.maxAngularDistForCorrespondence = 0;
-        mp.onlyKeepTheClosest              = true;
-        mp.decimation_other_map_points     = 1;
-        mp.offset_other_map_points         = 0;
-
-        mrpt::tfest::TMatchingPairList    mpl;
-        mrpt::maps::TMatchingExtraResults mres;
-
-        pc1->determineMatching3D(
-            pc2.get(), icp_out.found_pose_to_wrt_from.mean, mpl, mp, mres);
-
-        std::cout << "Validation match against raw point cloud:\n Match ratio: "
-                  << mres.correspondencesRatio * 100 << "%\n"
-                  << " RMSE: " << std::sqrt(mres.sumSqrDist / mpl.size())
-                  << "\n"
-                  << " Number of matched points: " << mpl.size() << "\n";
-    }
-
     std::cout << "Close windows or hit a key on first window to quit.\n";
     if (!wins.empty()) wins.begin()->second->waitForKey();
 }
