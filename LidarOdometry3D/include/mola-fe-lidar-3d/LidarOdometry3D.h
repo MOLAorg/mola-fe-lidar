@@ -16,6 +16,7 @@
 #include <mrpt/graphs/CNetworkOfPoses.h>
 #include <mrpt/maps/CPointsMap.h>
 #include <mrpt/slam/CICP.h>
+#include <p2p2/PointCloudEdgesFilter.h>
 #include <p2p2/PointCloudToVoxelGrid.h>
 #include <p2p2/PointsPlanesICP.h>
 #include <mutex>
@@ -173,7 +174,7 @@ class LidarOdometry3D : public FrontEndBase
         id_t                        last_kf{mola::INVALID_ID};
         mrpt::poses::CPose3D        accum_since_last_kf{};
         p2p2::PointCloudToVoxelGrid filter_grid4planes;
-        p2p2::PointCloudToVoxelGrid filter_grid4edges;
+        p2p2::PointCloudEdgesFilter filter_grid4edges;
 
         // An auxiliary (local) pose-graph to use Dijkstra and find guesses
         // for ICP against nearby past KFs:

@@ -184,10 +184,6 @@ void LidarOdometry3D::initialize(const std::string& cfg_block)
         state_.filter_grid4planes.resize(
             {-50.0, -50.0, -10.0}, {50.0, 50.0, 10.0},
             params_.voxel_filter4planes_resolution);
-
-        state_.filter_grid4edges.resize(
-            {-50.0, -50.0, -10.0}, {50.0, 50.0, 10.0},
-            params_.voxel_filter4edges_resolution);
     }
 
     // attach to world model, if present:
@@ -1201,8 +1197,7 @@ LidarOdometry3D::lidar_scan_t LidarOdometry3D::filterPointCloud(
     planes.reserve(pc.size() / 1000);
     pc_plane_centroids->reserve(pc.size() / 1000);
 
-    state_.filter_grid4edges.clear();
-    state_.filter_grid4edges.processPointCloud(pc);
+    state_.filter_grid4edges.processPointCloud(pc, *pc_edges);
 
     state_.filter_grid4planes.clear();
     state_.filter_grid4planes.processPointCloud(pc);
@@ -1211,7 +1206,8 @@ LidarOdometry3D::lidar_scan_t LidarOdometry3D::filterPointCloud(
     const auto& ys = pc.getPointsBufferRef_y();
     const auto& zs = pc.getPointsBufferRef_z();
 
-    std::size_t nEdgeVoxels = 0, nPlaneVoxels = 0;
+    std::size_t nPlaneVoxels = 0;
+#if 0
     for (const auto vxl_idx : state_.filter_grid4edges.used_voxel_indices)
     {
         const auto& vxl_pts =
@@ -1258,6 +1254,7 @@ LidarOdometry3D::lidar_scan_t LidarOdometry3D::filterPointCloud(
             }
         }
     }  // end for each voxel
+#endif
 
     // Planes:
     for (const auto vxl_idx : state_.filter_grid4planes.used_voxel_indices)
@@ -1323,7 +1320,7 @@ LidarOdometry3D::lidar_scan_t LidarOdometry3D::filterPointCloud(
 
     MRPT_LOG_DEBUG_STREAM(
         "[VoxelGridFilter] Voxel counts:\n"
-        << " edges=" << nEdgeVoxels << " planes=" << nPlaneVoxels);
+        << " planes=" << nPlaneVoxels);
 
     return scan;
 
