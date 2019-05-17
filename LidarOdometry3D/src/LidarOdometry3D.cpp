@@ -1007,11 +1007,9 @@ void LidarOdometry3D::run_one_icp(const ICP_Input& in, ICP_Output& out)
                      (in.align_kind == AlignKind::LoopClosure &&
                       params_.debug_save_loop_closures);
 
-#if 0
     if (gen_debug)
     {
-        const auto num_pc_layers = in.from_pc->layers.size();
-        debug_dump_icp_file_counter++;
+        const auto num_pc_layers = in.from_pc->pc.point_layers.size();
 
         for (unsigned int l = 0; l < num_pc_layers; l++)
         {
@@ -1019,14 +1017,14 @@ void LidarOdometry3D::run_one_icp(const ICP_Input& in, ICP_Output& out)
                 getModuleInstanceName() +
                 mrpt::format(
                     "_debug_ICP_%s_%05u_layer%02u", in.debug_str.c_str(),
-                    static_cast<unsigned int>(debug_dump_icp_file_counter), l));
+                    static_cast<unsigned int>(this_run_id), l));
 
             // Init:
             mrpt::opengl::COpenGLScene scene;
 
-            auto it_from = in.from_pc->layers.begin();
+            auto it_from = in.from_pc->pc.point_layers.begin();
             std::advance(it_from, l);
-            auto it_to = in.to_pc->layers.begin();
+            auto it_to = in.to_pc->pc.point_layers.begin();
             std::advance(it_to, l);
 
             scene.insert(
@@ -1148,7 +1146,6 @@ void LidarOdometry3D::run_one_icp(const ICP_Input& in, ICP_Output& out)
             }
         }
     }
-#endif
 
     MRPT_END
 }
@@ -1282,6 +1279,8 @@ LidarOdometry3D::lidar_scan_t LidarOdometry3D::filterPointCloud(
             params_.voxel_filter4planes_min_point_count)
             continue;
 
+        bool is_ground_plane = false;
+
         // Analyze the voxel contents:
         mrpt::math::TPoint3Df mean;
         Eigen::Matrix3f       cov;
@@ -1295,6 +1294,10 @@ LidarOdometry3D::lidar_scan_t LidarOdometry3D::filterPointCloud(
         // The eigenvalues are sorted in increasing order.
         const float e0 = eig_vals[0], e1 = eig_vals[1], e2 = eig_vals[2];
 
+        const Eigen::Vector3f ev0 = esolver.eigenvectors().col(0);
+
+        is_ground_plane = (std::abs(ev0.z()) > 0.9f);
+
         if (e1 > params_.voxel_filter4planes_min_e1_e0 * e0 &&
             e2 > params_.voxel_filter4planes_min_e2_e0 * e0)
         {
@@ -1306,7 +1309,6 @@ LidarOdometry3D::lidar_scan_t LidarOdometry3D::filterPointCloud(
             const auto pl_c = mrpt::math::TPoint3D(mean);
 
             // Normal = largest eigenvector:
-            const Eigen::Vector3f ev0 = esolver.eigenvectors().col(0);
             auto pl_n = mrpt::math::TVector3D(ev0.x(), ev0.y(), ev0.z());
 
             // Normal direction criterion: make it to face towards the vehicle.
@@ -1332,16 +1334,20 @@ LidarOdometry3D::lidar_scan_t LidarOdometry3D::filterPointCloud(
             pc_plane_centroids->insertPointFast(pl_c.x, pl_c.y, pl_c.z);
         }
 
+        // Decimation of the entire raw input point cloud:
+        // ----------------------------------------------
+        if (!is_ground_plane)
+        {
+            MRPT_TODO("make this skip count a parameter");
+            for (size_t i = 0; i < vxl_pts->indices.size(); i += 20)
+            {
+                const auto pt_idx = vxl_pts->indices[i];
+                const auto ptx = xs[pt_idx], pty = ys[pt_idx], ptz = zs[pt_idx];
+                pc_raw_decim->insertPointFast(ptx, pty, ptz);
+            }
+        }
+
     }  // end for each voxel
-
-    // Decimation of the entire raw input point cloud:
-    const auto        nRawPts         = xs.size();
-    const std::size_t decim_raw_ratio = std::max(
-        static_cast<std::size_t>(1),
-        nRawPts / params_.raw_decimate_point_count);
-
-    for (std::size_t i = 0; i < nRawPts; i += decim_raw_ratio)
-        pc_raw_decim->insertPointFast(xs[i], ys[i], zs[i]);
 
     // Mark all pcs as "modified" (to rebuild the kd-trees, etc.), since we used
     // the "fast" insert methods above:
