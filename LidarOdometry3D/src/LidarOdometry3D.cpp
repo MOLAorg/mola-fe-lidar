@@ -56,10 +56,13 @@ uint8_t LidarOdometry3D::lidar_scan_t::serializeGetVersion() const { return 0; }
 void    LidarOdometry3D::lidar_scan_t::serializeTo(
     mrpt::serialization::CArchive& out) const
 {
-    // out.WriteAs<uint32_t>(layers.size());
-    // for (const auto& l : layers) out << l.first << l.second;
-    MRPT_TODO("Implement");
-    // out << pc.point_layers << pc.lines << pc.planes;
+    out << pc.lines;
+
+    out.WriteAs<uint32_t>(pc.planes.size());
+    for (const auto& p : pc.planes) out << p.plane << p.centroid;
+
+    out.WriteAs<uint32_t>(pc.lines.size());
+    for (const auto& l : pc.lines) out << l;
 }
 void LidarOdometry3D::lidar_scan_t::serializeFrom(
     mrpt::serialization::CArchive& in, uint8_t version)
@@ -68,8 +71,14 @@ void LidarOdometry3D::lidar_scan_t::serializeFrom(
     {
         case 0:
         {
-            MRPT_TODO("Implement");
-            // in >> pc.point_layers >> pc.lines >> pc.planes;
+            in >> pc.lines;
+            const auto nPls = in.ReadAs<uint32_t>();
+            pc.planes.resize(nPls);
+            for (auto& pl : pc.planes) in >> pl.plane >> pl.centroid;
+
+            const auto nLins = in.ReadAs<uint32_t>();
+            pc.lines.resize(nLins);
+            for (auto& l : pc.lines) in >> l;
         }
         break;
         default:
