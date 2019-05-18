@@ -24,16 +24,34 @@ void PointCloudToVoxelGrid::resize(
 
 void PointCloudToVoxelGrid::processPointCloud(const mrpt::maps::CPointsMap& p)
 {
+    using mrpt::max3;
+    using std::abs;
+
     const auto& xs   = p.getPointsBufferRef_x();
     const auto& ys   = p.getPointsBufferRef_y();
     const auto& zs   = p.getPointsBufferRef_z();
     const auto  npts = xs.size();
 
+    // Previous point:
+    float x0, y0, z0;
+    x0 = y0 = z0 = std::numeric_limits<float>::max();
+
     for (std::size_t i = 0; i < npts; i++)
     {
-        const auto cx      = pts_voxels.x2idx(xs[i]);
-        const auto cy      = pts_voxels.y2idx(ys[i]);
-        const auto cz      = pts_voxels.z2idx(zs[i]);
+        // Skip this point?
+        if (params_.min_consecutive_distance != .0f &&
+            max3(abs(x0 - xs[i]), abs(y0 - ys[i]), abs(z0 - zs[i])) <
+                params_.min_consecutive_distance)
+            continue;
+
+        // Save for the next point:
+        x0 = xs[i];
+        y0 = ys[i];
+        z0 = zs[i];
+
+        const auto cx      = pts_voxels.x2idx(x0);
+        const auto cy      = pts_voxels.y2idx(y0);
+        const auto cz      = pts_voxels.z2idx(z0);
         const auto vxl_idx = pts_voxels.cellAbsIndexFromCXCYCZ(cx, cy, cz);
         if (vxl_idx == grid_t::INVALID_VOXEL_IDX) continue;
 

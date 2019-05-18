@@ -9,6 +9,8 @@
 #include <mrpt/core/bits_math.h>  // DEG2RAD()
 #include <cstddef>
 #include <cstdint>
+#include <set>
+#include <string>
 
 namespace p2p2
 {
@@ -42,10 +44,11 @@ struct Parameters
      * one. The speed-up comes from a decimation of the number of KD-tree
      * queries, the most expensive step in ICP */
     uint32_t corresponding_points_decimation{5};
+    // TODO: Remove, not used for PlanesPointsICP!
 
     uint32_t max_corresponding_points{100000};
 
-    std::string ignore_point_layer{"raw"};
+    std::set<std::string> ignore_point_layers{{"raw"}};
 };
 
 }  // namespace p2p2

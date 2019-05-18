@@ -23,6 +23,15 @@ class PointCloudToVoxelGrid
     void processPointCloud(const mrpt::maps::CPointsMap& p);
     void clear();
 
+    struct Parameters
+    {
+        /** Minimum distance (infinity norm) between consecutive points to be
+         * accepted in a voxel. */
+        float min_consecutive_distance{.0f};
+    };
+
+    Parameters params_;
+
     /** The list of point indices in each voxel */
     struct voxel_t
     {

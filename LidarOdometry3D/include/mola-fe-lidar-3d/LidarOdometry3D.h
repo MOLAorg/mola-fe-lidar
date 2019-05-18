@@ -62,9 +62,9 @@ class LidarOdometry3D : public FrontEndBase
         /** Minimum ICP quality for a loop closure to be accepted */
         double min_icp_goodness_lc{0.6};
 
-        /** If !=0, decimate point clouds so they do not have more than this
-         * number of points */
-        unsigned int decimate_to_point_count{500};
+        /** Max. number of pairings per layer (point-to-point,
+         * plane-to-plane...) */
+        unsigned int max_correspondences_per_layer{500};
 
         /** Params for the voxel filters */
         double       voxel_filter4planes_resolution{2.};
@@ -77,8 +77,6 @@ class LidarOdometry3D : public FrontEndBase
         unsigned int voxel_filter4edges_min_point_count{20};
         float        voxel_filter4edges_max_e1_e0{10.f};
         float        voxel_filter4edges_min_e2_e1{10.f};
-
-        unsigned int raw_decimate_point_count{2000};
 
         /** Distance range to check for additional SE(3) edges */
         double       min_dist_to_matching{6.0};

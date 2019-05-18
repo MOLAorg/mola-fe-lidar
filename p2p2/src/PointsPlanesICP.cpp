@@ -40,36 +40,12 @@ void PointsPlanesICP::align(
     // Reset output:
     result = Results();
 
-    // Matching params for point-to-point:
-    mrpt::maps::TMatchingParams mp;
-    // Distance threshold
-    mp.maxDistForCorrespondence = p.thresholdDist;
-    // Angular threshold
-    mp.maxAngularDistForCorrespondence = p.thresholdAng;
-    mp.onlyKeepTheClosest              = true;
-    mp.onlyUniqueRobust                = false;
-    mp.decimation_other_map_points     = p.corresponding_points_decimation;
-    // For decimation: cycle through all possible points, even if we decimate
-    // them, in such a way that different points are used in each iteration.
-    mp.offset_other_map_points = 0;
-
-    // Matching params for plane-to-plane (their centroids only at this point):
-    mrpt::maps::TMatchingParams mp_planes;
-    // Distance threshold
-    mp_planes.maxDistForCorrespondence =
-        p.thresholdDist +
-        2.0 /* since plane centroids must not show up at the same location */;
-    // Angular threshold
-    mp_planes.maxAngularDistForCorrespondence = 0.;
-    mp_planes.onlyKeepTheClosest              = true;
-    mp_planes.decimation_other_map_points     = 1;
-
     // Count of points:
     size_t pointcount1 = 0, pointcount2 = 0;
     for (const auto& kv1 : pcs1.point_layers)
     {
         // Ignore this layer?
-        if (kv1.first == p.ignore_point_layer) continue;
+        if (p.ignore_point_layers.count(kv1.first) != 0) continue;
 
         pointcount1 += kv1.second->size();
         pointcount2 += pcs2.point_layers.at(kv1.first)->size();
@@ -83,12 +59,54 @@ void PointsPlanesICP::align(
     auto solution      = mrpt::poses::CPose3D(init_guess_m2_wrt_m1);
     auto prev_solution = solution;
 
+    // Prepare params for "find pairings" for each layer:
+    std::map<std::string, mrpt::maps::TMatchingParams> mps;
+
+    for (const auto& kv1 : pcs1.point_layers)
+    {
+        const bool is_layer_of_planes = (kv1.first == "plane_centroids"s);
+
+        mrpt::maps::TMatchingParams& mp = mps[kv1.first];
+
+        if (!is_layer_of_planes)
+        {
+            const auto& m1 = kv1.second;
+            ASSERT_(m1);
+
+            // Matching params for point-to-point:
+            // Distance threshold
+            mp.maxDistForCorrespondence = p.thresholdDist;
+
+            // Angular threshold
+            mp.maxAngularDistForCorrespondence = p.thresholdAng;
+            mp.onlyKeepTheClosest              = true;
+            mp.onlyUniqueRobust                = false;
+            mp.decimation_other_map_points     = std::max(
+                1U, static_cast<unsigned>(
+                        m1->size() / (1.0 * p.max_corresponding_points)));
+
+            // For decimation: cycle through all possible points, even if we
+            // decimate them, in such a way that different points are used
+            // in each iteration.
+            mp.offset_other_map_points = 0;
+        }
+        else
+        {
+            // Matching params for plane-to-plane (their centroids only at
+            // this point):
+            // Distance threshold: + extra since  plane centroids must not
+            // show up at the same location
+            mp.maxDistForCorrespondence = p.thresholdDist + 2.0;
+            // Angular threshold
+            mp.maxAngularDistForCorrespondence = 0.;
+            mp.onlyKeepTheClosest              = true;
+            mp.decimation_other_map_points     = 1;
+        }
+    }
+
     for (; result.nIterations < p.maxIterations; result.nIterations++)
     {
         std::map<std::string, mrpt::maps::TMatchingExtraResults> mres;
-
-        // Measure angle distances from the current estimate:
-        mp.angularDistPivotPoint = mrpt::math::TPoint3D(solution.asTPose());
 
         // the global list of pairings:
         OLAE_Match_Input pairings;
@@ -103,20 +121,22 @@ void PointsPlanesICP::align(
             ASSERT_(m2);
 
             // Ignore this layer?
-            if (kv1.first == p.ignore_point_layer) continue;
+            if (p.ignore_point_layers.count(kv1.first) != 0) continue;
 
             const bool is_layer_of_planes = (kv1.first == "plane_centroids"s);
 
-            // Decimation rate:
-            mp.decimation_other_map_points = std::max(
-                1U, static_cast<unsigned>(
-                        m1->size() / (1.0 * p.max_corresponding_points)));
+            auto& mp = mps.at(kv1.first);
+            // Measure angle distances from the current estimate:
+            mp.angularDistPivotPoint = mrpt::math::TPoint3D(solution.asTPose());
 
             // Find closest pairings
             mrpt::tfest::TMatchingPairList mpl;
             m1->determineMatching3D(
-                m2.get(), solution, mpl, is_layer_of_planes ? mp_planes : mp,
-                mres[kv1.first]);
+                m2.get(), solution, mpl, mp, mres[kv1.first]);
+
+            // Shuffle decimated points for next iter:
+            if (++mp.offset_other_map_points >= mp.decimation_other_map_points)
+                mp.offset_other_map_points = 0;
 
             // merge lists:
             // handle specially the plane-to-plane matching:
@@ -175,7 +195,7 @@ void PointsPlanesICP::align(
         // Weights: translation => trust points; attitude => trust planes
         pairings.weights.translation.planes = 0.0;
         pairings.weights.translation.points = 1.0;
-        pairings.weights.attitude.planes    = 10.0;
+        pairings.weights.attitude.planes    = 0.001;
         pairings.weights.attitude.points    = 1.0;
 
         pairings.use_robust_kernel = p.use_kernel;
@@ -198,10 +218,6 @@ void PointsPlanesICP::align(
             break;
         }
 
-        // Shuffle decimated points for next iter:
-        // if (++mp.offset_other_map_points >=
-        // p.corresponding_points_decimation) mp.offset_other_map_points = 0;
-
         prev_solution = solution;
     }
 
@@ -213,6 +229,13 @@ void PointsPlanesICP::align(
     {
         // Matching params for point-to-point:
         // Reuse those of the last stage, stored in "mp" above.
+        mrpt::maps::TMatchingParams mp;
+        mp.maxDistForCorrespondence        = p.thresholdDist;
+        mp.maxAngularDistForCorrespondence = p.thresholdAng;
+        mp.onlyKeepTheClosest              = true;
+        mp.onlyUniqueRobust                = false;
+
+        MRPT_TODO("Rethink this, make a param,...");
         mp.decimation_other_map_points = 100;
 
         mrpt::tfest::TMatchingPairList    mpl;
