@@ -62,6 +62,10 @@ void PointsPlanesICP::align_OLAE(
     // Prepare params for "find pairings" for each layer:
     std::map<std::string, mrpt::maps::TMatchingParams> mps;
 
+    // Find largest point cloud:
+    std::string layerOfLargestPc;
+    std::size_t pointCountLargestPc = 0;
+
     for (const auto& kv1 : pcs1.point_layers)
     {
         const bool is_layer_of_planes = (kv1.first == "plane_centroids"s);
@@ -74,6 +78,12 @@ void PointsPlanesICP::align_OLAE(
 
             const auto& m1 = kv1.second;
             ASSERT_(m1);
+
+            if (m1->size() > pointCountLargestPc)
+            {
+                pointCountLargestPc = m1->size();
+                layerOfLargestPc    = kv1.first;
+            }
 
             // Matching params for point-to-point:
             // Distance threshold
@@ -106,10 +116,10 @@ void PointsPlanesICP::align_OLAE(
         }
     }
 
+    std::map<std::string, mrpt::maps::TMatchingExtraResults> mres;
+
     for (; result.nIterations < p.maxIterations; result.nIterations++)
     {
-        std::map<std::string, mrpt::maps::TMatchingExtraResults> mres;
-
         // the global list of pairings:
         OLAE_Match_Input pairings;
 
@@ -231,27 +241,8 @@ void PointsPlanesICP::align_OLAE(
         result.terminationReason = IterTermReason::MaxIterations;
 
     // Ratio of points with a valid pairing:
-    // Evaluate with the raw point clouds:
-    {
-        // Matching params for point-to-point:
-        // Reuse those of the last stage, stored in "mp" above.
-        mrpt::maps::TMatchingParams mp;
-        mp.maxDistForCorrespondence        = p.thresholdDist;
-        mp.maxAngularDistForCorrespondence = p.thresholdAng;
-        mp.onlyKeepTheClosest              = true;
-        mp.onlyUniqueRobust                = false;
-
-        MRPT_TODO("Rethink this, make a param,...");
-        mp.decimation_other_map_points = 100;
-
-        mrpt::tfest::TMatchingPairList    mpl;
-        mrpt::maps::TMatchingExtraResults mres;
-
-        pcs1.point_layers.at("raw")->determineMatching3D(
-            pcs2.point_layers.at("raw").get(), solution, mpl, mp, mres);
-
-        result.goodness = mres.correspondencesRatio;
-    }
+    if (!layerOfLargestPc.empty())
+        result.goodness = mres.at(layerOfLargestPc).correspondencesRatio;
 
     // Store output:
     result.optimal_tf.mean = solution;

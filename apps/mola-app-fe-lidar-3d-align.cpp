@@ -50,6 +50,9 @@ static TCLAP::ValueArg<std::string> arg_init_pose(
     "p", "pose-guess", "Initial guess for the relative pose", false,
     "[0 0 0 0 0 0]", "(x,y,z [m] yaw pitch roll [deg])", cmd);
 
+static TCLAP::SwitchArg arg_no_gui(
+    "", "no-gui", "Disables the gui (Default: NO)", cmd);
+
 static mrpt::system::CTimeLogger timlog;
 
 void do_scan_align_test()
@@ -141,6 +144,13 @@ void do_scan_align_test()
         mrpt::system::CTimeLoggerEntry tle(timlog, "run_one_icp");
         module.run_one_icp(icp_in, icp_out);
     }
+
+    std::cout << "Align results:\n"
+                 " - found_pose_to_wrt_from:"
+              << icp_out.found_pose_to_wrt_from.asString() << "\n"
+              << " - goodness: " << icp_out.goodness << "\n";
+
+    if (arg_no_gui.isSet()) return;
 
     // Display "layers":
     std::map<std::string, mrpt::gui::CDisplayWindow3D::Ptr> wins;
@@ -249,11 +259,6 @@ void do_scan_align_test()
 
         win->repaint();
     }
-
-    std::cout << "Align results:\n"
-                 " - found_pose_to_wrt_from:"
-              << icp_out.found_pose_to_wrt_from.asString() << "\n"
-              << " - goodness: " << icp_out.goodness << "\n";
 
     std::cout << "Close windows or hit a key on first window to quit.\n";
     if (!wins.empty()) wins.begin()->second->waitForKey();
