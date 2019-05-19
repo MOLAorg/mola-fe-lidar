@@ -46,6 +46,8 @@ struct Parameters
     uint32_t corresponding_points_decimation{5};
     // TODO: Remove, not used for PlanesPointsICP!
 
+    double relative_weight_planes_attitude{1.0};
+
     uint32_t max_corresponding_points{100000};
 
     std::set<std::string> pt2pt_layers;

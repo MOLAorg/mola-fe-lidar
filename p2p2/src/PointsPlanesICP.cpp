@@ -208,7 +208,7 @@ void PointsPlanesICP::align_OLAE(
         // Weights: translation => trust points; attitude => trust planes
         pairings.weights.translation.planes = 0.0;
         pairings.weights.translation.points = 1.0;
-        pairings.weights.attitude.planes    = 1.0;
+        pairings.weights.attitude.planes    = p.relative_weight_planes_attitude;
         pairings.weights.attitude.points    = 1.0;
 
         pairings.use_robust_kernel = p.use_kernel;

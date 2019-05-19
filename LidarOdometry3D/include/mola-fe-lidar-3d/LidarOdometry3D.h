@@ -66,6 +66,10 @@ class LidarOdometry3D : public FrontEndBase
          * plane-to-plane...) */
         unsigned int max_correspondences_per_layer{500};
 
+        /** For the OLAE alignment algorithm, the relative weight of planes for
+         * optimal attitude solution */
+        double olae_relative_weight_planes_attitude{1.0};
+
         /** Params for the voxel filters */
         double       voxel_filter4planes_resolution{2.};
         double       voxel_filter4planes_min_point_spacing{0.10};
