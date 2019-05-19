@@ -39,6 +39,34 @@ static TCLAP::ValueArg<std::string> arg_params_file(
 
 static mrpt::system::CTimeLogger timlog;
 
+MRPT_TODO("Move this to a unit test");
+#if 1
+#include <mrpt/io/CMemoryStream.h>
+#include <mrpt/serialization/CArchive.h>
+void test_serialization_lidar_scan_t(
+    const mola::LidarOdometry3D::lidar_scan_t& s1)
+{
+    MRPT_START
+    mrpt::io::CMemoryStream mem;
+
+    auto a = mrpt::serialization::archiveFrom(mem);
+
+    // Write:
+    a << s1;
+
+    // rewind:
+    mem.Seek(0);
+
+    // read:
+    mola::LidarOdometry3D::lidar_scan_t s2;
+    a >> s2;
+
+    ASSERT_EQUAL_(s1.pc.point_layers.size(), s2.pc.point_layers.size());
+
+    MRPT_END
+}
+#endif
+
 void do_scan_segment_test()
 {
     using namespace std::string_literals;
@@ -164,6 +192,11 @@ void do_scan_segment_test()
 
         win->repaint();
     }
+
+    MRPT_TODO("Move this to a unit test");
+#if 1
+    test_serialization_lidar_scan_t(scan);
+#endif
 
     std::cout << "Close windows or hit a key on first window to quit.\n";
     if (!wins.empty()) wins.begin()->second->waitForKey();
