@@ -129,7 +129,7 @@ struct OLAE_Match_Input
     };
 
     bool   use_robust_kernel{true};
-    double robust_kernel_param{mrpt::DEG2RAD(0.1)}, robust_kernel_scale{200.0};
+    double robust_kernel_param{mrpt::DEG2RAD(0.5)}, robust_kernel_scale{400.0};
 
     /// See docs for Weights
     Weights weights;

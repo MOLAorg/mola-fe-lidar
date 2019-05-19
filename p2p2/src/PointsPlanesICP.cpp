@@ -70,6 +70,8 @@ void PointsPlanesICP::align_OLAE(
 
         if (!is_layer_of_planes)
         {
+            if (p.pt2pt_layers.count(kv1.first) == 0) continue;
+
             const auto& m1 = kv1.second;
             ASSERT_(m1);
 
@@ -120,10 +122,11 @@ void PointsPlanesICP::align_OLAE(
             ASSERT_(m1);
             ASSERT_(m2);
 
-            // Ignore this layer?
-            if (p.pt2pt_layers.count(kv1.first) == 0) continue;
-
             const bool is_layer_of_planes = (kv1.first == "plane_centroids"s);
+
+            // Ignore this layer?
+            if (!is_layer_of_planes && p.pt2pt_layers.count(kv1.first) == 0)
+                continue;
 
             auto& mp = mps.at(kv1.first);
             // Measure angle distances from the current estimate:
@@ -195,10 +198,13 @@ void PointsPlanesICP::align_OLAE(
         // Weights: translation => trust points; attitude => trust planes
         pairings.weights.translation.planes = 0.0;
         pairings.weights.translation.points = 1.0;
-        pairings.weights.attitude.planes    = 10.0;
+        pairings.weights.attitude.planes    = 1.0;
         pairings.weights.attitude.points    = 1.0;
 
         pairings.use_robust_kernel = p.use_kernel;
+        MRPT_TODO("make param");
+        // pairings.robust_kernel_param = mrpt::DEG2RAD(0.05);
+        // pairings.robust_kernel_scale = 1500.0;
 
         olae_match(pairings, res);
 

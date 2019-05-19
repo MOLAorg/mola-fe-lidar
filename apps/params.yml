@@ -15,8 +15,8 @@ params:
     voxel_filter4edges_resolution: 2.0  # [meters]
     voxel_filter4edges_min_point_count: 10 # min. points count/voxel to accept
     voxel_filter4edges_min_point_spacing: 0.05   # [meters]
-    voxel_filter4edges_decimation: 5
-    voxel_filter4edges_max_e1_e0: 200
+    voxel_filter4edges_decimation: 10
+    voxel_filter4edges_max_e1_e0: 50
     voxel_filter4edges_min_e2_e1: 1
     # Voxel filter for planes:
     voxel_filter4planes_resolution: 3.0  # [meters]
