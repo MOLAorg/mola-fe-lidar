@@ -628,6 +628,8 @@ void PointsPlanesICP::p2p_match(
     Eigen::VectorXd err(nErrorTerms);
     Eigen::MatrixXd J(nErrorTerms, 6);
 
+    double w_pt = 1.0, w_pl = 50.0;
+
     for (size_t iter = 0; iter < in.max_iterations; iter++)
     {
         const auto dDexpe_de =
@@ -655,7 +657,7 @@ void PointsPlanesICP::p2p_match(
                  ).finished();
             // clang-format on
 
-            J.block<3, 6>(idx_pt * 3, 0) = J1 * dDexpe_de;
+            J.block<3, 6>(idx_pt * 3, 0) = w_pt * J1 * dDexpe_de;
         }
 
         // Point-to-plane:
@@ -689,7 +691,7 @@ void PointsPlanesICP::p2p_match(
             const Eigen::Matrix<double, 1, 6> Jb = Jpl * J1 * dDexpe_de;
             // std::cout << "jb: " << Jb << "\n";
 
-            J.block<1, 6>(idx_pl + nPt2Pt * 3, 0) = Jb;
+            J.block<1, 6>(idx_pl + nPt2Pt * 3, 0) = w_pl * Jb;
         }
 
         // 3) Solve Gauss-Newton:
