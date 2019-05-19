@@ -45,7 +45,7 @@ void PointsPlanesICP::align_OLAE(
     for (const auto& kv1 : pcs1.point_layers)
     {
         // Ignore this layer?
-        if (p.ignore_point_layers.count(kv1.first) != 0) continue;
+        if (p.pt2pt_layers.count(kv1.first) == 0) continue;
 
         pointcount1 += kv1.second->size();
         pointcount2 += pcs2.point_layers.at(kv1.first)->size();
@@ -121,7 +121,7 @@ void PointsPlanesICP::align_OLAE(
             ASSERT_(m2);
 
             // Ignore this layer?
-            if (p.ignore_point_layers.count(kv1.first) != 0) continue;
+            if (p.pt2pt_layers.count(kv1.first) == 0) continue;
 
             const bool is_layer_of_planes = (kv1.first == "plane_centroids"s);
 
@@ -720,8 +720,6 @@ void PointsPlanesICP::align(
     const mrpt::math::TPose3D& init_guess_m2_wrt_m1, const Parameters& p,
     Results& result)
 {
-    THROW_EXCEPTION("impl!");
-#if 0
     using namespace std::string_literals;
 
     MRPT_START
@@ -737,19 +735,6 @@ void PointsPlanesICP::align(
     // Reset output:
     result = Results();
 
-    // Count of points:
-    size_t pointcount1 = 0, pointcount2 = 0;
-    for (const auto& kv1 : pcs1.point_layers)
-    {
-        // Ignore this layer?
-        if (p.ignore_point_layers.count(kv1.first) != 0) continue;
-
-        pointcount1 += kv1.second->size();
-        pointcount2 += pcs2.point_layers.at(kv1.first)->size();
-    }
-    ASSERT_(pointcount1 > 0 || !pcs1.planes.empty());
-    ASSERT_(pointcount2 > 0 || !pcs2.planes.empty());
-
     // ------------------------------------------------------
     // The P2P2 ICP loop
     // ------------------------------------------------------
@@ -759,9 +744,13 @@ void PointsPlanesICP::align(
     // Prepare params for "find pairings" for each layer:
     std::map<std::string, mrpt::maps::TMatchingParams> mps;
 
+    //    icp_params.pt2pt_layers.insert("color_bright"s);
+    //    icp_params.pt2pt_layers.insert("edges"s);
+    //    icp_params.pt2pl_layer = "plane_points"s;
+
     for (const auto& kv1 : pcs1.point_layers)
     {
-        const bool is_layer_of_planes = (kv1.first == "plane_centroids"s);
+        const bool is_layer_of_planes = (kv1.first == p.pt2pl_layer);
 
         mrpt::maps::TMatchingParams& mp = mps[kv1.first];
 
@@ -806,72 +795,72 @@ void PointsPlanesICP::align(
         std::map<std::string, mrpt::maps::TMatchingExtraResults> mres;
 
         // the global list of pairings:
-        OLAE_Match_Input pairings;
+        P2P_Match_Input pairings;
 
         // Correspondences for each point layer:
         // ---------------------------------------
         // Find correspondences for each point cloud "layer":
-        for (const auto& kv1 : pcs1.point_layers)
+        for (const auto& ptLy : p.pt2pt_layers)
         {
-            const auto &m1 = kv1.second, &m2 = pcs2.point_layers.at(kv1.first);
+            const auto &m1 = pcs1.point_layers.at(ptLy),
+                       &m2 = pcs2.point_layers.at(ptLy);
             ASSERT_(m1);
             ASSERT_(m2);
 
-            // Ignore this layer?
-            if (p.ignore_point_layers.count(kv1.first) != 0) continue;
+            auto& mp = mps.at(ptLy);
+            // Measure angle distances from the current estimate:
+            mp.angularDistPivotPoint = mrpt::math::TPoint3D(solution.asTPose());
 
-            const bool is_layer_of_planes = (kv1.first == "plane_centroids"s);
+            // Find closest pairings
+            mrpt::tfest::TMatchingPairList mpl;
+            m1->determineMatching3D(m2.get(), solution, mpl, mp, mres[ptLy]);
 
-            auto& mp = mps.at(kv1.first);
+            // Shuffle decimated points for next iter:
+            if (++mp.offset_other_map_points >= mp.decimation_other_map_points)
+                mp.offset_other_map_points = 0;
+
+            // A standard layer: point-to-point correspondences:
+            pairings.paired_points.insert(
+                pairings.paired_points.end(), mpl.begin(), mpl.end());
+
+        }  // end for each point layer
+
+        // point-to-planes
+        if (!p.pt2pl_layer.empty())
+        {
+            const auto &m1 = pcs1.point_layers.at("plane_centroids"),
+                       &m2 = pcs2.point_layers.at(p.pt2pl_layer);
+            ASSERT_(m1);
+            ASSERT_(m2);
+
+            auto& mp = mps.at(p.pt2pl_layer);
             // Measure angle distances from the current estimate:
             mp.angularDistPivotPoint = mrpt::math::TPoint3D(solution.asTPose());
 
             // Find closest pairings
             mrpt::tfest::TMatchingPairList mpl;
             m1->determineMatching3D(
-                m2.get(), solution, mpl, mp, mres[kv1.first]);
+                m2.get(), solution, mpl, mp, mres[p.pt2pl_layer]);
+            // Plane-to-plane correspondence:
 
-            // Shuffle decimated points for next iter:
-            if (++mp.offset_other_map_points >= mp.decimation_other_map_points)
-                mp.offset_other_map_points = 0;
-
-            // merge lists:
-            // handle specially the plane-to-plane matching:
-            if (!is_layer_of_planes)
+            // We have pairs of planes whose centroids are quite close.
+            // Check their normals too:
+            for (const auto& pair : mpl)
             {
-                // A standard layer: point-to-point correspondences:
-                pairings.paired_points.insert(
-                    pairings.paired_points.end(), mpl.begin(), mpl.end());
-            }
-            else
-            {
-                // Plane-to-plane correspondence:
+                // 1) Check fo pairing sanity:
+                ASSERTDEB_(pair.this_idx < pcs1.planes.size());
+                ASSERTDEB_(pair.other_idx < m2->size());
 
-                // We have pairs of planes whose centroids are quite close.
-                // Check their normals too:
-                for (const auto& pair : mpl)
+                const auto&           pl_this = pcs1.planes[pair.this_idx];
+                mrpt::math::TPoint3Df pt_other;
+                m2->getPoint(
+                    pair.other_idx, pt_other.x, pt_other.y, pt_other.z);
+
+                // 2) append to list of plane pairs:
+                // if (1)
                 {
-                    // 1) Check fo pairing sanity:
-                    ASSERTDEB_(pair.this_idx < pcs1.planes.size());
-                    ASSERTDEB_(pair.other_idx < pcs2.planes.size());
-
-                    const auto& p1 = pcs1.planes[pair.this_idx];
-                    const auto& p2 = pcs2.planes[pair.other_idx];
-
-                    const mrpt::math::TVector3D n1 = p1.plane.getNormalVector();
-                    const mrpt::math::TVector3D n2 = p2.plane.getNormalVector();
-
-                    // dot product to find the angle between normals:
-                    const double dp = n1.x * n2.x + n1.y * n2.y + n1.z * n2.z;
-                    const double n2n_ang = std::acos(dp);
-
-                    // 2) append to list of plane pairs:
-                    MRPT_TODO("Set threshold parameter");
-                    if (n2n_ang < mrpt::DEG2RAD(5.0))
-                    {
-                        // Accept pairing:
-                        pairings.paired_planes.emplace_back(p1, p2);
-                    }
+                    // Accept pairing:
+                    pairings.paired_pt2pl.emplace_back(pl_this, pt_other);
                 }
             }
         }
@@ -884,20 +873,21 @@ void PointsPlanesICP::align(
             break;
         }
 
+#if 0
+        std::cout << "[p2p2 pairings] " << pairings.paired_points.size()
+                  << " pt2pt " << pairings.paired_pt2pl.size() << " pt2pl.\n";
+#endif
+
         // Compute the optimal pose, using the OLAE method
         // (Optimal linear attitude estimator)
         // ------------------------------------------------
-        OLAE_Match_Result res;
-
-        // Weights: translation => trust points; attitude => trust planes
-        pairings.weights.translation.planes = 0.0;
-        pairings.weights.translation.points = 1.0;
-        pairings.weights.attitude.planes    = 0.01;
-        pairings.weights.attitude.points    = 1.0;
+        P2P_Match_Result res;
 
         pairings.use_robust_kernel = p.use_kernel;
+        MRPT_TODO("make this a parameter");
+        pairings.max_iterations = 10;
 
-        olae_match(pairings, res);
+        p2p_match(pairings, res);
 
         solution = mrpt::poses::CPose3D(res.optimal_pose);
 
@@ -949,5 +939,4 @@ void PointsPlanesICP::align(
     MRPT_TODO("covariance of the estimation");
 
     MRPT_END
-#endif
 }

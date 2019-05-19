@@ -164,12 +164,15 @@ void LidarOdometry3D::initialize(const std::string& cfg_block)
     YAML_LOAD_OPT(params_, voxel_filter4planes_min_point_count, unsigned int);
     YAML_LOAD_OPT(params_, voxel_filter4planes_min_e1_e0, float);
     YAML_LOAD_OPT(params_, voxel_filter4planes_min_e2_e0, float);
+    YAML_LOAD_OPT(params_, voxel_filter4planes_min_point_spacing, double);
+    YAML_LOAD_OPT(params_, voxel_filter4planes_decimation, unsigned int);
 
     YAML_LOAD_OPT(params_, voxel_filter4edges_resolution, double);
     YAML_LOAD_OPT(params_, voxel_filter4edges_min_point_count, unsigned int);
     YAML_LOAD_OPT(params_, voxel_filter4edges_max_e1_e0, float);
     YAML_LOAD_OPT(params_, voxel_filter4edges_min_e2_e1, float);
     YAML_LOAD_OPT(params_, voxel_filter4edges_decimation, unsigned int);
+    YAML_LOAD_OPT(params_, voxel_filter4edges_min_point_spacing, double);
 
     YAML_LOAD_OPT(params_, min_dist_to_matching, double);
     YAML_LOAD_OPT(params_, max_dist_to_matching, double);
@@ -202,11 +205,10 @@ void LidarOdometry3D::initialize(const std::string& cfg_block)
             {-90.0, -90.0, -10.0}, {90.0, 90.0, 10.0},
             params_.voxel_filter4edges_resolution);
 
-        MRPT_TODO("make these a parameter");
         state_.filter_grid4planes.params_.min_consecutive_distance =
-            0;  // 0.05f;
+            params_.voxel_filter4planes_min_point_spacing;
         state_.filter_grid4edges.params_.min_consecutive_distance =
-            0;  // 0.20f;
+            params_.voxel_filter4edges_min_point_spacing;
     }
 
     // attach to world model, if present:
@@ -954,9 +956,10 @@ void LidarOdometry3D::run_one_icp(const ICP_Input& in, ICP_Output& out)
             icp_params.max_corresponding_points =
                 params_.max_correspondences_per_layer;
 
-            icp_params.ignore_point_layers.clear();
-            icp_params.ignore_point_layers.insert("raw"s);
-            icp_params.ignore_point_layers.insert("plane_points"s);
+            icp_params.pt2pt_layers.clear();
+            icp_params.pt2pt_layers.insert("color_bright"s);
+            icp_params.pt2pt_layers.insert("edges"s);
+            icp_params.pt2pl_layer = "plane_points"s;
 
             p2p2::Results icp_result;
 #if 0
@@ -1326,8 +1329,8 @@ LidarOdometry3D::lidar_scan_t LidarOdometry3D::filterPointCloud(
             {
                 const auto pt_idx = vxl_pts->indices[i];
                 const auto ptx = xs[pt_idx], pty = ys[pt_idx], ptz = zs[pt_idx];
-                // if ((i % params_.voxel_filter4edges_decimation) == 0)
-                pc_plane_points->insertPointFast(ptx, pty, ptz);
+                if ((i % params_.voxel_filter4planes_decimation) == 0)
+                    pc_plane_points->insertPointFast(ptx, pty, ptz);
             }
         }
 

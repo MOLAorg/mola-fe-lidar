@@ -48,7 +48,8 @@ struct Parameters
 
     uint32_t max_corresponding_points{100000};
 
-    std::set<std::string> ignore_point_layers{{"raw"}};
+    std::set<std::string> pt2pt_layers;
+    std::string           pt2pl_layer;
 };
 
 }  // namespace p2p2

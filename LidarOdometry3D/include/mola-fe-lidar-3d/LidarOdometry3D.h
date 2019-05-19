@@ -68,11 +68,14 @@ class LidarOdometry3D : public FrontEndBase
 
         /** Params for the voxel filters */
         double       voxel_filter4planes_resolution{2.};
+        double       voxel_filter4planes_min_point_spacing{0.10};
         unsigned int voxel_filter4planes_min_point_count{20};
         float        voxel_filter4planes_min_e1_e0{100.f};
         float        voxel_filter4planes_min_e2_e0{100.f};
+        unsigned int voxel_filter4planes_decimation{1};
 
         double       voxel_filter4edges_resolution{.5};
+        double       voxel_filter4edges_min_point_spacing{0.10};
         unsigned int voxel_filter4edges_decimation{1};
         unsigned int voxel_filter4edges_min_point_count{20};
         float        voxel_filter4edges_max_e1_e0{10.f};
