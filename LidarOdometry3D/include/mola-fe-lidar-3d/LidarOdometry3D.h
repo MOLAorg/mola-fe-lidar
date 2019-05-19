@@ -62,10 +62,6 @@ class LidarOdometry3D : public FrontEndBase
         /** Minimum ICP quality for a loop closure to be accepted */
         double min_icp_goodness_lc{0.6};
 
-        /** Max. number of pairings per layer (point-to-point,
-         * plane-to-plane...) */
-        unsigned int max_correspondences_per_layer{500};
-
         /** For the OLAE alignment algorithm, the relative weight of planes for
          * optimal attitude solution */
         double olae_relative_weight_planes_attitude{1.0};

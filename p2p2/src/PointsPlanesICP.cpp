@@ -94,8 +94,8 @@ void PointsPlanesICP::align_OLAE(
             mp.onlyKeepTheClosest              = true;
             mp.onlyUniqueRobust                = false;
             mp.decimation_other_map_points     = std::max(
-                1U, static_cast<unsigned>(
-                        m1->size() / (1.0 * p.max_corresponding_points)));
+                1U,
+                static_cast<unsigned>(m1->size() / (1.0 * p.maxPairsPerLayer)));
 
             // For decimation: cycle through all possible points, even if we
             // decimate them, in such a way that different points are used
@@ -226,6 +226,12 @@ void PointsPlanesICP::align_OLAE(
             mrpt::poses::Lie::SE<3>::log(deltaSol);
         const double delta_xyz = dSol.head<3>().norm();
         const double delta_rot = dSol.tail<3>().norm();
+
+#if 0
+        std::cout << "Dxyz: " << std::abs(delta_xyz)
+                  << " Drot:" << std::abs(delta_rot)
+                  << " p: " << solution.asString() << "\n";
+#endif
 
         if (std::abs(delta_xyz) < p.minAbsStep_trans &&
             std::abs(delta_rot) < p.minAbsStep_rot)
@@ -767,8 +773,8 @@ void PointsPlanesICP::align(
             mp.onlyKeepTheClosest              = true;
             mp.onlyUniqueRobust                = false;
             mp.decimation_other_map_points     = std::max(
-                1U, static_cast<unsigned>(
-                        m1->size() / (1.0 * p.max_corresponding_points)));
+                1U,
+                static_cast<unsigned>(m1->size() / (1.0 * p.maxPairsPerLayer)));
 
             // For decimation: cycle through all possible points, even if we
             // decimate them, in such a way that different points are used

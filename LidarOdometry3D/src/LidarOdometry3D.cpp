@@ -126,6 +126,10 @@ static void load_icp_set_of_params(
     ASSERTMSG_(cfg[sName], "Missing YAML required entry: `"s + sName + "`"s);
     std::string useKernel = cfg[sName].as<std::string>("");
 
+    sName = prefix + "maxPairsPerLayer"s;
+    ASSERTMSG_(cfg[sName], "Missing YAML required entry: `"s + sName + "`"s);
+    std::string maxPairsPerLayer = cfg[sName].as<std::string>("");
+
     // Vector -> values:
     std::vector<std::string> maxIterations_vals;
     mrpt::system::tokenize(maxIterations, " ,", maxIterations_vals);
@@ -139,10 +143,14 @@ static void load_icp_set_of_params(
     std::vector<std::string> useKernel_vals;
     mrpt::system::tokenize(useKernel, " ,", useKernel_vals);
 
+    std::vector<std::string> maxPairsPerLayer_vals;
+    mrpt::system::tokenize(maxPairsPerLayer, " ,", maxPairsPerLayer_vals);
+
     ASSERT_(maxIterations_vals.size() >= 1);
     ASSERT_(maxIterations_vals.size() == thresholdDists_vals.size());
     ASSERT_(maxIterations_vals.size() == thresholdAngs_vals.size());
     ASSERT_(maxIterations_vals.size() == useKernel_vals.size());
+    ASSERT_(maxIterations_vals.size() == maxPairsPerLayer_vals.size());
 
     const size_t n = thresholdAngs_vals.size();
     out.resize(n);
@@ -152,6 +160,7 @@ static void load_icp_set_of_params(
         out[i].thresholdDist = std::stod(thresholdDists_vals[i]);
         out[i].thresholdAng  = mrpt::DEG2RAD(std::stod(thresholdAngs_vals[i]));
         out[i].use_kernel    = (std::stoul(useKernel_vals[i]) != 0);
+        out[i].maxPairsPerLayer = std::stoul(maxPairsPerLayer_vals[i]);
     }
 
     MRPT_END
@@ -172,7 +181,6 @@ void LidarOdometry3D::initialize(const std::string& cfg_block)
     YAML_LOAD_OPT(params_, min_time_between_scans, double);
     YAML_LOAD_OPT(params_, min_icp_goodness, double);
     YAML_LOAD_OPT(params_, min_icp_goodness_lc, double);
-    YAML_LOAD_OPT(params_, max_correspondences_per_layer, unsigned int);
 
     YAML_LOAD_OPT(params_, olae_relative_weight_planes_attitude, double);
 
@@ -969,8 +977,6 @@ void LidarOdometry3D::run_one_icp(const ICP_Input& in, ICP_Output& out)
         for (unsigned int stage = 0; stage < in.icp_params.size(); stage++)
         {
             p2p2::Parameters icp_params = in.icp_params[stage];
-            icp_params.max_corresponding_points =
-                params_.max_correspondences_per_layer;
             icp_params.relative_weight_planes_attitude =
                 params_.olae_relative_weight_planes_attitude;
 

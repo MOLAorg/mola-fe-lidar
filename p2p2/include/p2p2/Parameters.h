@@ -20,14 +20,18 @@ struct Parameters
         @{ */
     /** Maximum number of iterations to run. */
     size_t maxIterations{40};
+
+    /** Max. number of pairings per layer (point-to-point, plane-to-plane...) */
+    unsigned int maxPairsPerLayer{500};
+
     /** If the correction in all translation coordinates (X,Y,Z) is below
      * this threshold (in meters), iterations are terminated (Default:1e-6)
      */
-    double minAbsStep_trans{1e-6};
+    double minAbsStep_trans{5e-4};
     /** If the correction in all rotation coordinates (yaw,pitch,roll) is
      * below this threshold (in radians), iterations are terminated
      * (Default:1e-6) */
-    double minAbsStep_rot{1e-6};
+    double minAbsStep_rot{1e-4};
     /** @} */
 
     /** Treshold distance for pair two near points */
@@ -47,8 +51,6 @@ struct Parameters
     // TODO: Remove, not used for PlanesPointsICP!
 
     double relative_weight_planes_attitude{1.0};
-
-    uint32_t max_corresponding_points{100000};
 
     std::set<std::string> pt2pt_layers;
     std::string           pt2pl_layer;
