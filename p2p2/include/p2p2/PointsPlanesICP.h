@@ -66,6 +66,11 @@ struct pointcloud_t
         const render_params_t&       p = render_params_t());
 };
 
+void align_OLAE(
+    const pointcloud_t& pcs1, const pointcloud_t& pcs2,
+    const mrpt::math::TPose3D& init_guess_m2_wrt_m1, const Parameters& p,
+    Results& result);
+
 void align(
     const pointcloud_t& pcs1, const pointcloud_t& pcs2,
     const mrpt::math::TPose3D& init_guess_m2_wrt_m1, const Parameters& p,
@@ -144,5 +149,46 @@ struct OLAE_Match_Result
  * Refer to technical report: XXX
  */
 void olae_match(const OLAE_Match_Input& in, OLAE_Match_Result& result);
+
+struct point_plane_pair_t
+{
+    /// \note "this"=global, "other"=local, while finding the transformation
+    /// local wrt global
+    plane_patch_t         pl_this;
+    mrpt::math::TPoint3Df pt_other;
+
+    point_plane_pair_t() = default;
+    point_plane_pair_t(
+        const plane_patch_t& p_this, const mrpt::math::TPoint3Df& p_other)
+        : pl_this(p_this), pt_other(p_other)
+    {
+    }
+};
+using TMatchedPointPlaneList = std::vector<point_plane_pair_t>;
+
+struct P2P_Match_Input
+{
+    /// We reuse MRPT struct to allow using their matching functions.
+    /// \note on MRPT naming convention: "this"=global; "other"=local.
+    mrpt::tfest::TMatchingPairList paired_points;
+    TMatchedPointPlaneList         paired_pt2pl;
+
+    bool                 use_robust_kernel{true};
+    double               robust_kernel_param{0.05};  /// [meters]
+    std::size_t          max_iterations{25};
+    double               min_delta{1e-9};
+    mrpt::poses::CPose3D initial_guess;
+
+    bool empty() const { return paired_points.empty() && paired_pt2pl.empty(); }
+};
+
+struct P2P_Match_Result
+{
+    mrpt::poses::CPose3D optimal_pose;
+};
+
+/** points-and-planes optimal pose solver.
+ */
+void p2p_match(const P2P_Match_Input& in, P2P_Match_Result& result);
 
 }  // namespace p2p2::PointsPlanesICP

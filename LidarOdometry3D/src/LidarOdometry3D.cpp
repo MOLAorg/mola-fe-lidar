@@ -203,8 +203,10 @@ void LidarOdometry3D::initialize(const std::string& cfg_block)
             params_.voxel_filter4edges_resolution);
 
         MRPT_TODO("make these a parameter");
-        state_.filter_grid4planes.params_.min_consecutive_distance = 0.05f;
-        state_.filter_grid4edges.params_.min_consecutive_distance  = 0.20f;
+        state_.filter_grid4planes.params_.min_consecutive_distance =
+            0;  // 0.05f;
+        state_.filter_grid4edges.params_.min_consecutive_distance =
+            0;  // 0.20f;
     }
 
     // attach to world model, if present:
@@ -528,6 +530,12 @@ void LidarOdometry3D::doProcessNewObservation(CObservation::Ptr& o)
                     state_.local_pose_graph.graph.insertEdgeAtEnd(
                         state_.last_kf, *kf_out.new_kf_id,
                         state_.accum_since_last_kf);
+
+                    MRPT_TODO("refactor: create make_pair_sorted()");
+                    const auto pair_ids = std::make_pair(
+                        std::min(state_.last_kf, *kf_out.new_kf_id),
+                        std::max(state_.last_kf, *kf_out.new_kf_id));
+                    state_.local_pose_graph.checked_KF_pairs.insert(pair_ids);
                 }
 
                 MRPT_LOG_DEBUG_STREAM(
@@ -946,15 +954,18 @@ void LidarOdometry3D::run_one_icp(const ICP_Input& in, ICP_Output& out)
             icp_params.max_corresponding_points =
                 params_.max_correspondences_per_layer;
 
-            MRPT_TODO("explain/refactor");
             icp_params.ignore_point_layers.clear();
             icp_params.ignore_point_layers.insert("raw"s);
-            if (stage != (in.icp_params.size() - 1))
-                icp_params.ignore_point_layers.insert("resampled_planes"s);
+            icp_params.ignore_point_layers.insert("plane_points"s);
 
             p2p2::Results icp_result;
+#if 0
+            p2p2::PointsPlanesICP::align_OLAE(
+                pcs_from, pcs_to, current_solution, icp_params, icp_result);
+#else
             p2p2::PointsPlanesICP::align(
                 pcs_from, pcs_to, current_solution, icp_params, icp_result);
+#endif
 
             if (icp_result.goodness > 0)
             {
@@ -1174,23 +1185,23 @@ LidarOdometry3D::lidar_scan_t LidarOdometry3D::filterPointCloud(
     // The result:
     lidar_scan_t scan;
 
-    auto& pc_edges            = scan.pc.point_layers["edges"];
-    auto& pc_plane_centroids  = scan.pc.point_layers["plane_centroids"];
-    auto& pc_color_bright     = scan.pc.point_layers["color_bright"];
-    auto& pc_resampled_planes = scan.pc.point_layers["resampled_planes"];
-    auto& planes              = scan.pc.planes;
+    auto& pc_edges           = scan.pc.point_layers["edges"];
+    auto& pc_plane_centroids = scan.pc.point_layers["plane_centroids"];
+    auto& pc_color_bright    = scan.pc.point_layers["color_bright"];
+    auto& pc_plane_points    = scan.pc.point_layers["plane_points"];
+    auto& planes             = scan.pc.planes;
 
     auto pc_xyzi = dynamic_cast<const mrpt::maps::CPointsMapXYZI*>(&pc);
 
-    pc_edges            = mrpt::maps::CSimplePointsMap::Create();
-    pc_plane_centroids  = mrpt::maps::CSimplePointsMap::Create();
-    pc_color_bright     = mrpt::maps::CSimplePointsMap::Create();
-    pc_resampled_planes = mrpt::maps::CSimplePointsMap::Create();
+    pc_edges           = mrpt::maps::CSimplePointsMap::Create();
+    pc_plane_centroids = mrpt::maps::CSimplePointsMap::Create();
+    pc_color_bright    = mrpt::maps::CSimplePointsMap::Create();
+    pc_plane_points    = mrpt::maps::CSimplePointsMap::Create();
 
     pc_edges->reserve(pc.size() / 10);
     planes.reserve(pc.size() / 1000);
     pc_plane_centroids->reserve(pc.size() / 1000);
-    pc_resampled_planes->reserve(pc.size() / 200);
+    pc_plane_points->reserve(pc.size() / 200);
 
     state_.filter_grid4edges.clear();
     state_.filter_grid4edges.processPointCloud(pc);
@@ -1310,25 +1321,13 @@ LidarOdometry3D::lidar_scan_t LidarOdometry3D::filterPointCloud(
             // Also: add the centroid to this special layer:
             pc_plane_centroids->insertPointFast(pl_c.x, pl_c.y, pl_c.z);
 
-            // Also, add a set of resampled points to a special layer:
-            // -----------------------------------------------------------
-            if (pl_c.norm() > 20.0)
+            // Also, keep original plane points in an independent layer:
+            for (size_t i = 0; i < vxl_pts->indices.size(); i++)
             {
-                MRPT_TODO("params!");
-
-                const Eigen::Vector3f ev1 = esolver.eigenvectors().col(1),
-                                      ev2 = esolver.eigenvectors().col(2);
-                const int nP              = 2;
-                for (int ix = -nP; ix <= nP; ix++)
-                    for (int iy = -nP; iy <= nP; iy++)
-                    {
-                        const float K =
-                            params_.voxel_filter4planes_resolution / nP;
-                        pc_resampled_planes->insertPointFast(
-                            pl_c.x + ix * K * ev1.x() + iy * K * ev2.x(),
-                            pl_c.y + ix * K * ev1.y() + iy * K * ev2.y(),
-                            pl_c.z + ix * K * ev1.z() + iy * K * ev2.z());
-                    }
+                const auto pt_idx = vxl_pts->indices[i];
+                const auto ptx = xs[pt_idx], pty = ys[pt_idx], ptz = zs[pt_idx];
+                // if ((i % params_.voxel_filter4edges_decimation) == 0)
+                pc_plane_points->insertPointFast(ptx, pty, ptz);
             }
         }
 
@@ -1339,7 +1338,7 @@ LidarOdometry3D::lidar_scan_t LidarOdometry3D::filterPointCloud(
     pc_color_bright->mark_as_modified();
     pc_edges->mark_as_modified();
     pc_plane_centroids->mark_as_modified();
-    pc_resampled_planes->mark_as_modified();
+    pc_plane_points->mark_as_modified();
 
     MRPT_LOG_DEBUG_STREAM(
         "[VoxelGridFilter] Voxel counts:\n"

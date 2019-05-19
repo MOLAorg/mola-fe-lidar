@@ -19,7 +19,7 @@
 
 using namespace p2p2;
 
-void PointsPlanesICP::align(
+void PointsPlanesICP::align_OLAE(
     const PointsPlanesICP::pointcloud_t& pcs1,
     const PointsPlanesICP::pointcloud_t& pcs2,
     const mrpt::math::TPose3D& init_guess_m2_wrt_m1, const Parameters& p,
@@ -195,7 +195,7 @@ void PointsPlanesICP::align(
         // Weights: translation => trust points; attitude => trust planes
         pairings.weights.translation.planes = 0.0;
         pairings.weights.translation.points = 1.0;
-        pairings.weights.attitude.planes    = 0.001;
+        pairings.weights.attitude.planes    = 10.0;
         pairings.weights.attitude.points    = 1.0;
 
         pairings.use_robust_kernel = p.use_kernel;
@@ -606,4 +606,348 @@ void PointsPlanesICP::pointcloud_t::planesAsRenderizable(
     }
 
     MRPT_END
+}
+
+void PointsPlanesICP::p2p_match(
+    const PointsPlanesICP::P2P_Match_Input& in,
+    PointsPlanesICP::P2P_Match_Result&      result)
+{
+    using std::size_t;
+
+    MRPT_START
+
+    // Run Gauss-Newton steps, using SE(3) relinearization at the current
+    // solution:
+    result.optimal_pose = in.initial_guess;
+
+    const auto nPt2Pt = in.paired_points.size();
+    const auto nPt2Pl = in.paired_pt2pl.size();
+
+    const auto nErrorTerms = nPt2Pt * 3 + nPt2Pl;
+
+    Eigen::VectorXd err(nErrorTerms);
+    Eigen::MatrixXd J(nErrorTerms, 6);
+
+    for (size_t iter = 0; iter < in.max_iterations; iter++)
+    {
+        const auto dDexpe_de =
+            mrpt::poses::Lie::SE<3>::jacob_dDexpe_de(result.optimal_pose);
+
+        // Point-to-point:
+        for (size_t idx_pt = 0; idx_pt < nPt2Pt; idx_pt++)
+        {
+            // Error:
+            const auto&  p  = in.paired_points[idx_pt];
+            const double lx = p.other_x, ly = p.other_y, lz = p.other_z;
+            double       gx, gy, gz;
+            result.optimal_pose.composePoint(lx, ly, lz, gx, gy, gz);
+            err(idx_pt * 3 + 0) = gx - p.this_x;
+            err(idx_pt * 3 + 1) = gy - p.this_y;
+            err(idx_pt * 3 + 2) = gz - p.this_z;
+
+            // Eval Jacobian:
+            // clang-format off
+            const Eigen::Matrix<double, 3, 12> J1 =
+                (Eigen::Matrix<double, 3, 12>() <<
+                   lx,  0,  0,  ly,  0,  0, lz,  0,  0,  1,  0,  0,
+                    0, lx,  0,  0,  ly,  0,  0, lz,  0,  0,  1,  0,
+                    0,  0, lx,  0,  0,  ly,  0,  0, lz,  0,  0,  1
+                 ).finished();
+            // clang-format on
+
+            J.block<3, 6>(idx_pt * 3, 0) = J1 * dDexpe_de;
+        }
+
+        // Point-to-plane:
+        for (size_t idx_pl = 0; idx_pl < nPt2Pl; idx_pl++)
+        {
+            // Error:
+            const auto& p = in.paired_pt2pl[idx_pl];
+
+            const double lx = p.pt_other.x, ly = p.pt_other.y,
+                         lz = p.pt_other.z;
+            mrpt::math::TPoint3D g;
+            result.optimal_pose.composePoint(lx, ly, lz, g.x, g.y, g.z);
+
+            err(idx_pl + nPt2Pt * 3) = p.pl_this.plane.evaluatePoint(g);
+
+            // Eval Jacobian:
+            // clang-format off
+            const Eigen::Matrix<double, 3, 12> J1 =
+                (Eigen::Matrix<double, 3, 12>() <<
+                   lx,  0,  0,  ly,  0,  0, lz,  0,  0,  1,  0,  0,
+                    0, lx,  0,  0,  ly,  0,  0, lz,  0,  0,  1,  0,
+                    0,  0, lx,  0,  0,  ly,  0,  0, lz,  0,  0,  1
+                 ).finished();
+            // clang-format on
+
+            const Eigen::Matrix<double, 1, 3> Jpl =
+                (Eigen::Matrix<double, 1, 3>() << p.pl_this.plane.coefs[0],
+                 p.pl_this.plane.coefs[1], p.pl_this.plane.coefs[2])
+                    .finished();
+
+            const Eigen::Matrix<double, 1, 6> Jb = Jpl * J1 * dDexpe_de;
+            // std::cout << "jb: " << Jb << "\n";
+
+            J.block<1, 6>(idx_pl + nPt2Pt * 3, 0) = Jb;
+        }
+
+        // 3) Solve Gauss-Newton:
+        const Eigen::VectorXd             g = J.transpose() * err;
+        const Eigen::Matrix<double, 6, 6> H = J.transpose() * J;
+        const Eigen::Matrix<double, 6, 1> delta =
+            -H.colPivHouseholderQr().solve(g);
+
+        // 4) add SE(3) increment:
+        const auto dE =
+            mrpt::poses::Lie::SE<3>::exp(mrpt::math::CArrayDouble<6>(delta));
+
+        result.optimal_pose = result.optimal_pose + dE;
+
+        //        std::cout << "[P2P GN] iter:" << iter << " err:" << err.norm()
+        //                  << " delta:" << delta.transpose() << "\n";
+
+        // Simple convergence test:
+        if (delta.norm() < in.min_delta) break;
+
+    }  // for each iteration
+    MRPT_END
+}
+
+void PointsPlanesICP::align(
+    const PointsPlanesICP::pointcloud_t& pcs1,
+    const PointsPlanesICP::pointcloud_t& pcs2,
+    const mrpt::math::TPose3D& init_guess_m2_wrt_m1, const Parameters& p,
+    Results& result)
+{
+    THROW_EXCEPTION("impl!");
+#if 0
+    using namespace std::string_literals;
+
+    MRPT_START
+    // ICP uses KD-trees.
+    // kd-trees have each own mutexes to ensure well-defined behavior in
+    // multi-threading apps.
+
+    ASSERT_EQUAL_(pcs1.point_layers.size(), pcs2.point_layers.size());
+    ASSERT_(
+        !pcs1.point_layers.empty() ||
+        (!pcs1.planes.empty() && !pcs2.planes.empty()));
+
+    // Reset output:
+    result = Results();
+
+    // Count of points:
+    size_t pointcount1 = 0, pointcount2 = 0;
+    for (const auto& kv1 : pcs1.point_layers)
+    {
+        // Ignore this layer?
+        if (p.ignore_point_layers.count(kv1.first) != 0) continue;
+
+        pointcount1 += kv1.second->size();
+        pointcount2 += pcs2.point_layers.at(kv1.first)->size();
+    }
+    ASSERT_(pointcount1 > 0 || !pcs1.planes.empty());
+    ASSERT_(pointcount2 > 0 || !pcs2.planes.empty());
+
+    // ------------------------------------------------------
+    // The P2P2 ICP loop
+    // ------------------------------------------------------
+    auto solution      = mrpt::poses::CPose3D(init_guess_m2_wrt_m1);
+    auto prev_solution = solution;
+
+    // Prepare params for "find pairings" for each layer:
+    std::map<std::string, mrpt::maps::TMatchingParams> mps;
+
+    for (const auto& kv1 : pcs1.point_layers)
+    {
+        const bool is_layer_of_planes = (kv1.first == "plane_centroids"s);
+
+        mrpt::maps::TMatchingParams& mp = mps[kv1.first];
+
+        if (!is_layer_of_planes)
+        {
+            const auto& m1 = kv1.second;
+            ASSERT_(m1);
+
+            // Matching params for point-to-point:
+            // Distance threshold
+            mp.maxDistForCorrespondence = p.thresholdDist;
+
+            // Angular threshold
+            mp.maxAngularDistForCorrespondence = p.thresholdAng;
+            mp.onlyKeepTheClosest              = true;
+            mp.onlyUniqueRobust                = false;
+            mp.decimation_other_map_points     = std::max(
+                1U, static_cast<unsigned>(
+                        m1->size() / (1.0 * p.max_corresponding_points)));
+
+            // For decimation: cycle through all possible points, even if we
+            // decimate them, in such a way that different points are used
+            // in each iteration.
+            mp.offset_other_map_points = 0;
+        }
+        else
+        {
+            // Matching params for plane-to-plane (their centroids only at
+            // this point):
+            // Distance threshold: + extra since  plane centroids must not
+            // show up at the same location
+            mp.maxDistForCorrespondence = p.thresholdDist + 2.0;
+            // Angular threshold
+            mp.maxAngularDistForCorrespondence = 0.;
+            mp.onlyKeepTheClosest              = true;
+            mp.decimation_other_map_points     = 1;
+        }
+    }
+
+    for (; result.nIterations < p.maxIterations; result.nIterations++)
+    {
+        std::map<std::string, mrpt::maps::TMatchingExtraResults> mres;
+
+        // the global list of pairings:
+        OLAE_Match_Input pairings;
+
+        // Correspondences for each point layer:
+        // ---------------------------------------
+        // Find correspondences for each point cloud "layer":
+        for (const auto& kv1 : pcs1.point_layers)
+        {
+            const auto &m1 = kv1.second, &m2 = pcs2.point_layers.at(kv1.first);
+            ASSERT_(m1);
+            ASSERT_(m2);
+
+            // Ignore this layer?
+            if (p.ignore_point_layers.count(kv1.first) != 0) continue;
+
+            const bool is_layer_of_planes = (kv1.first == "plane_centroids"s);
+
+            auto& mp = mps.at(kv1.first);
+            // Measure angle distances from the current estimate:
+            mp.angularDistPivotPoint = mrpt::math::TPoint3D(solution.asTPose());
+
+            // Find closest pairings
+            mrpt::tfest::TMatchingPairList mpl;
+            m1->determineMatching3D(
+                m2.get(), solution, mpl, mp, mres[kv1.first]);
+
+            // Shuffle decimated points for next iter:
+            if (++mp.offset_other_map_points >= mp.decimation_other_map_points)
+                mp.offset_other_map_points = 0;
+
+            // merge lists:
+            // handle specially the plane-to-plane matching:
+            if (!is_layer_of_planes)
+            {
+                // A standard layer: point-to-point correspondences:
+                pairings.paired_points.insert(
+                    pairings.paired_points.end(), mpl.begin(), mpl.end());
+            }
+            else
+            {
+                // Plane-to-plane correspondence:
+
+                // We have pairs of planes whose centroids are quite close.
+                // Check their normals too:
+                for (const auto& pair : mpl)
+                {
+                    // 1) Check fo pairing sanity:
+                    ASSERTDEB_(pair.this_idx < pcs1.planes.size());
+                    ASSERTDEB_(pair.other_idx < pcs2.planes.size());
+
+                    const auto& p1 = pcs1.planes[pair.this_idx];
+                    const auto& p2 = pcs2.planes[pair.other_idx];
+
+                    const mrpt::math::TVector3D n1 = p1.plane.getNormalVector();
+                    const mrpt::math::TVector3D n2 = p2.plane.getNormalVector();
+
+                    // dot product to find the angle between normals:
+                    const double dp = n1.x * n2.x + n1.y * n2.y + n1.z * n2.z;
+                    const double n2n_ang = std::acos(dp);
+
+                    // 2) append to list of plane pairs:
+                    MRPT_TODO("Set threshold parameter");
+                    if (n2n_ang < mrpt::DEG2RAD(5.0))
+                    {
+                        // Accept pairing:
+                        pairings.paired_planes.emplace_back(p1, p2);
+                    }
+                }
+            }
+        }
+
+        if (pairings.empty())
+        {
+            // Nothing we can do !!
+            result.terminationReason = IterTermReason::NoPairings;
+            result.goodness          = 0;
+            break;
+        }
+
+        // Compute the optimal pose, using the OLAE method
+        // (Optimal linear attitude estimator)
+        // ------------------------------------------------
+        OLAE_Match_Result res;
+
+        // Weights: translation => trust points; attitude => trust planes
+        pairings.weights.translation.planes = 0.0;
+        pairings.weights.translation.points = 1.0;
+        pairings.weights.attitude.planes    = 0.01;
+        pairings.weights.attitude.points    = 1.0;
+
+        pairings.use_robust_kernel = p.use_kernel;
+
+        olae_match(pairings, res);
+
+        solution = mrpt::poses::CPose3D(res.optimal_pose);
+
+        // If matching has not changed, we are done:
+        const auto                        deltaSol = solution - prev_solution;
+        const mrpt::math::CArrayDouble<6> dSol =
+            mrpt::poses::Lie::SE<3>::log(deltaSol);
+        const double delta_xyz = dSol.head<3>().norm();
+        const double delta_rot = dSol.tail<3>().norm();
+
+        if (std::abs(delta_xyz) < p.minAbsStep_trans &&
+            std::abs(delta_rot) < p.minAbsStep_rot)
+        {
+            result.terminationReason = IterTermReason::Stalled;
+            break;
+        }
+
+        prev_solution = solution;
+    }
+
+    if (result.nIterations >= p.maxIterations)
+        result.terminationReason = IterTermReason::MaxIterations;
+
+    // Ratio of points with a valid pairing:
+    // Evaluate with the raw point clouds:
+    {
+        // Matching params for point-to-point:
+        // Reuse those of the last stage, stored in "mp" above.
+        mrpt::maps::TMatchingParams mp;
+        mp.maxDistForCorrespondence        = p.thresholdDist;
+        mp.maxAngularDistForCorrespondence = p.thresholdAng;
+        mp.onlyKeepTheClosest              = true;
+        mp.onlyUniqueRobust                = false;
+
+        MRPT_TODO("Rethink this, make a param,...");
+        mp.decimation_other_map_points = 100;
+
+        mrpt::tfest::TMatchingPairList    mpl;
+        mrpt::maps::TMatchingExtraResults mres;
+
+        pcs1.point_layers.at("raw")->determineMatching3D(
+            pcs2.point_layers.at("raw").get(), solution, mpl, mp, mres);
+
+        result.goodness = mres.correspondencesRatio;
+    }
+
+    // Store output:
+    result.optimal_tf.mean = solution;
+    MRPT_TODO("covariance of the estimation");
+
+    MRPT_END
+#endif
 }
