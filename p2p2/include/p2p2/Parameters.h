@@ -52,8 +52,8 @@ struct Parameters
 
     double relative_weight_planes_attitude{1.0};
 
-    std::set<std::string> pt2pt_layers;
-    std::string           pt2pl_layer;
+    std::map<std::string, double> pt2pt_layers;  //!< Weight for each layer
+    std::string                   pt2pl_layer;
 };
 
 }  // namespace p2p2

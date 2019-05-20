@@ -981,8 +981,9 @@ void LidarOdometry3D::run_one_icp(const ICP_Input& in, ICP_Output& out)
                 params_.olae_relative_weight_planes_attitude;
 
             icp_params.pt2pt_layers.clear();
-            icp_params.pt2pt_layers.insert("color_bright"s);
-            icp_params.pt2pt_layers.insert("edges"s);
+            icp_params.pt2pt_layers["non_planar"s]   = 1.0;
+            icp_params.pt2pt_layers["color_bright"s] = 5.0;
+            icp_params.pt2pt_layers["plane_points"s] = 0.1;
 
             icp_params.pt2pl_layer = "plane_points"s;
 
@@ -1213,23 +1214,23 @@ LidarOdometry3D::lidar_scan_t LidarOdometry3D::filterPointCloud(
     // The result:
     lidar_scan_t scan;
 
-    auto& pc_edges           = scan.pc.point_layers["edges"];
-    auto& pc_plane_centroids = scan.pc.point_layers["plane_centroids"];
-    auto& pc_color_bright    = scan.pc.point_layers["color_bright"];
-    // auto& pc_plane_points = scan.pc.point_layers["plane_points"];
-    auto& planes = scan.pc.planes;
+    auto& pc_nonplanar = scan.pc.point_layers["non_planar"];
+    // auto& pc_plane_centroids = scan.pc.point_layers["plane_centroids"];
+    auto& pc_color_bright = scan.pc.point_layers["color_bright"];
+    auto& pc_plane_points = scan.pc.point_layers["plane_points"];
+    auto& planes          = scan.pc.planes;
 
     auto pc_xyzi = dynamic_cast<const mrpt::maps::CPointsMapXYZI*>(&pc);
 
-    pc_edges           = mrpt::maps::CSimplePointsMap::Create();
-    pc_plane_centroids = mrpt::maps::CSimplePointsMap::Create();
-    pc_color_bright    = mrpt::maps::CSimplePointsMap::Create();
-    // pc_plane_points = mrpt::maps::CSimplePointsMap::Create();
+    pc_nonplanar = mrpt::maps::CSimplePointsMap::Create();
+    // pc_plane_centroids = mrpt::maps::CSimplePointsMap::Create();
+    pc_color_bright = mrpt::maps::CSimplePointsMap::Create();
+    pc_plane_points = mrpt::maps::CSimplePointsMap::Create();
 
-    pc_edges->reserve(pc.size() / 10);
+    pc_nonplanar->reserve(pc.size() / 10);
     planes.reserve(pc.size() / 1000);
-    pc_plane_centroids->reserve(pc.size() / 1000);
-    // pc_plane_points->reserve(pc.size() / 200);
+    // pc_plane_centroids->reserve(pc.size() / 1000);
+    pc_plane_points->reserve(pc.size() / 200);
 
     state_.filter_grid4edges.clear();
     state_.filter_grid4edges.processPointCloud(pc);
@@ -1275,7 +1276,7 @@ LidarOdometry3D::lidar_scan_t LidarOdometry3D::filterPointCloud(
                 const auto ptx = xs[pt_idx], pty = ys[pt_idx], ptz = zs[pt_idx];
 
                 if ((i % params_.voxel_filter4edges_decimation) == 0)
-                    pc_edges->insertPointFast(ptx, pty, ptz);
+                    pc_nonplanar->insertPointFast(ptx, pty, ptz);
 
                 if (pc_xyzi)
                 {
@@ -1347,15 +1348,15 @@ LidarOdometry3D::lidar_scan_t LidarOdometry3D::filterPointCloud(
             planes.emplace_back(pl, pl_c);
 
             // Also: add the centroid to this special layer:
-            pc_plane_centroids->insertPointFast(pl_c.x, pl_c.y, pl_c.z);
+            // pc_plane_centroids->insertPointFast(pl_c.x, pl_c.y, pl_c.z);
 
             // Also, keep original plane points in an independent layer:
             for (size_t i = 0; i < vxl_pts->indices.size(); i++)
             {
                 const auto pt_idx = vxl_pts->indices[i];
                 const auto ptx = xs[pt_idx], pty = ys[pt_idx], ptz = zs[pt_idx];
-                // if ((i % params_.voxel_filter4planes_decimation) == 0)
-                // pc_plane_points->insertPointFast(ptx, pty, ptz);
+                if ((i % params_.voxel_filter4planes_decimation) == 0)
+                    pc_plane_points->insertPointFast(ptx, pty, ptz);
             }
         }
 
@@ -1364,9 +1365,9 @@ LidarOdometry3D::lidar_scan_t LidarOdometry3D::filterPointCloud(
     // Mark all pcs as "modified" (to rebuild the kd-trees, etc.), since we used
     // the "fast" insert methods above:
     pc_color_bright->mark_as_modified();
-    pc_edges->mark_as_modified();
-    pc_plane_centroids->mark_as_modified();
-    // pc_plane_points->mark_as_modified();
+    pc_nonplanar->mark_as_modified();
+    // pc_plane_centroids->mark_as_modified();
+    pc_plane_points->mark_as_modified();
 
     MRPT_LOG_DEBUG_STREAM(
         "[VoxelGridFilter] Voxel counts:\n"

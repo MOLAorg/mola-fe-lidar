@@ -112,7 +112,8 @@ class LidarOdometry3D : public FrontEndBase
     using topological_dist_t = std::size_t;
 
     /** Different "layers" in which a point cloud is decomposed,
-     * for example: "edges", "planes", etc. plus features like lines, planes,...
+     * for example: "non_planar", "planes", etc. plus features like lines,
+     * planes,...
      */
     struct lidar_scan_t : public mrpt::serialization::CSerializable
     {

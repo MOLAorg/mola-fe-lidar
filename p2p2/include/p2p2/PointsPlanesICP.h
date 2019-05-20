@@ -103,8 +103,14 @@ struct OLAE_Match_Input
     /// We reuse MRPT struct to allow using their matching functions.
     /// \note on MRPT naming convention: "this"=global; "other"=local.
     mrpt::tfest::TMatchingPairList paired_points;
-    TMatchedLineList               paired_lines;
-    TMatchedPlaneList              paired_planes;
+
+    /** Weights for paired_points: each entry specifies how many points have the
+     * given (mapped second value) weight, in the same order as stored in
+     * paired_points */
+    std::vector<std::pair<std::size_t, double>> point_weights;
+
+    TMatchedLineList  paired_lines;
+    TMatchedPlaneList paired_planes;
 
     /** Relative weight of points, lines, and planes. They will be automatically
      * normalized to sum the unity, so feel free of setting weights at any
@@ -171,7 +177,13 @@ struct P2P_Match_Input
     /// We reuse MRPT struct to allow using their matching functions.
     /// \note on MRPT naming convention: "this"=global; "other"=local.
     mrpt::tfest::TMatchingPairList paired_points;
-    TMatchedPointPlaneList         paired_pt2pl;
+
+    /** Weights for paired_points: each entry specifies how many points have the
+     * given (mapped second value) weight, in the same order as stored in
+     * paired_points */
+    std::vector<std::pair<std::size_t, double>> point_weights;
+
+    TMatchedPointPlaneList paired_pt2pl;
 
     bool                 use_robust_kernel{true};
     double               robust_kernel_param{0.05};  /// [meters]

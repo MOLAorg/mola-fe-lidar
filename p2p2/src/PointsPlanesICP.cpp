@@ -155,9 +155,15 @@ void PointsPlanesICP::align_OLAE(
             // handle specially the plane-to-plane matching:
             if (!is_layer_of_planes)
             {
+                // layer weight:
+                const double lyWeight = p.pt2pt_layers.at(kv1.first);
+
                 // A standard layer: point-to-point correspondences:
                 pairings.paired_points.insert(
                     pairings.paired_points.end(), mpl.begin(), mpl.end());
+
+                // and their weights:
+                pairings.point_weights.emplace_back(mpl.size(), lyWeight);
             }
             else
             {
@@ -283,7 +289,12 @@ static std::tuple<Eigen::Matrix3d, Eigen::Vector3d> olae_build_linear_system(
     const auto nPoints     = in.paired_points.size();
     const auto nLines      = in.paired_lines.size();
     const auto nPlanes     = in.paired_planes.size();
-    const auto nAllMatches = nPoints + nPlanes;
+    const auto nAllMatches = nPoints + nLines + nPlanes;
+
+    // weight of points, block by block:
+    ASSERT_(!in.point_weights.empty());
+    auto        cur_point_block_weights = in.point_weights.begin();
+    std::size_t cur_point_block_start   = 0;
 
     // Normalized weights for attitude "waXX":
     double waPoints, waLines, waPlanes;
@@ -320,6 +331,15 @@ static std::tuple<Eigen::Matrix3d, Eigen::Vector3d> olae_build_linear_system(
             // point-to-point pairing:  normalize(point-centroid)
             const auto& p = in.paired_points[i];
             wi            = waPoints;
+
+            if (i >= cur_point_block_start + cur_point_block_weights->first)
+            {
+                ASSERT_(cur_point_block_weights != in.point_weights.end());
+                ++cur_point_block_weights;  // move to next block
+                cur_point_block_start = i;
+            }
+            wi *= cur_point_block_weights->second;
+            // (solution will be normalized via robust_w_sum a the end)
 
             bi = TVector3D(p.this_x, p.this_y, p.this_z) - ct_this;
             ri = TVector3D(p.other_x, p.other_y, p.other_z) - ct_other;
@@ -750,7 +770,7 @@ void PointsPlanesICP::align(
     std::map<std::string, mrpt::maps::TMatchingParams> mps;
 
     //    icp_params.pt2pt_layers.insert("color_bright"s);
-    //    icp_params.pt2pt_layers.insert("edges"s);
+    //    icp_params.pt2pt_layers.insert("non_planar"s);
     //    icp_params.pt2pl_layer = "plane_points"s;
 
     for (const auto& kv1 : pcs1.point_layers)
@@ -805,8 +825,11 @@ void PointsPlanesICP::align(
         // Correspondences for each point layer:
         // ---------------------------------------
         // Find correspondences for each point cloud "layer":
-        for (const auto& ptLy : p.pt2pt_layers)
+        for (const auto& ptLyWeight : p.pt2pt_layers)
         {
+            const auto&  ptLy     = ptLyWeight.first;  // layer name
+            const double lyWeight = ptLyWeight.second;  // layer weight
+
             const auto &m1 = pcs1.point_layers.at(ptLy),
                        &m2 = pcs2.point_layers.at(ptLy);
             ASSERT_(m1);
@@ -827,6 +850,9 @@ void PointsPlanesICP::align(
             // A standard layer: point-to-point correspondences:
             pairings.paired_points.insert(
                 pairings.paired_points.end(), mpl.begin(), mpl.end());
+
+            // and their weights:
+            pairings.point_weights.emplace_back(mpl.size(), lyWeight);
 
         }  // end for each point layer
 
