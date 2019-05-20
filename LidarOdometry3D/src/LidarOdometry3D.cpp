@@ -182,7 +182,7 @@ void LidarOdometry3D::initialize(const std::string& cfg_block)
     YAML_LOAD_OPT(params_, min_icp_goodness, double);
     YAML_LOAD_OPT(params_, min_icp_goodness_lc, double);
 
-    YAML_LOAD_OPT(params_, icp_plane_layer_weight, double);
+    YAML_LOAD_OPT(params_, icp_full_decim_layer_weight, double);
     YAML_LOAD_OPT(params_, olae_relative_weight_planes_attitude, double);
 
     YAML_LOAD_OPT(params_, full_pointcloud_decimation, unsigned int);
@@ -979,7 +979,8 @@ void LidarOdometry3D::run_one_icp(const ICP_Input& in, ICP_Output& out)
             icp_params.pt2pt_layers["non_planar"s]   = 1.0;
             icp_params.pt2pt_layers["color_bright"s] = 5.0;
             // icp_params.pt2pt_layers["plane_points"s] = 0.1;
-            icp_params.pt2pt_layers["decim_full"s] = 0.2;
+            icp_params.pt2pt_layers["decim_full"s] =
+                params_.icp_full_decim_layer_weight;
 
             icp_params.pt2pl_layer = "plane_points"s;
 

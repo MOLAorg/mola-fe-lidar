@@ -11,8 +11,8 @@ params:
     min_icp_goodness_lc: 0.75     # range [0,1]
     #
     olae_relative_weight_planes_attitude: 10.0
-    # Relative weight of plane points in ICP:
-    icp_plane_layer_weight: 0.01
+    # Relative weight of full decimated point cloud in ICP:
+    icp_full_decim_layer_weight: 0.1
     # Voxel filter: general params
     voxel_filter_resolution: 1  # [meters]
     voxel_filter_min_point_count: 10 # min. points count/voxel to accept

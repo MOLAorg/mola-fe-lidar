@@ -62,7 +62,7 @@ class LidarOdometry3D : public FrontEndBase
         /** Minimum ICP quality for a loop closure to be accepted */
         double min_icp_goodness_lc{0.6};
 
-        double icp_plane_layer_weight{1.0};
+        double icp_full_decim_layer_weight{1.0};
 
         unsigned int full_pointcloud_decimation{10};
 
