@@ -80,8 +80,7 @@ class LidarOdometry3D : public FrontEndBase
         unsigned int voxel_filter4planes_decimation{1};
 
         unsigned int voxel_filter4edges_decimation{1};
-        float        voxel_filter4edges_max_e1_e0{10.f};
-        float        voxel_filter4edges_min_e2_e1{10.f};
+        double       voxel_filter4edges_keep_ratio{0.2};
 
         /** Distance range to check for additional SE(3) edges */
         double       min_dist_to_matching{6.0};

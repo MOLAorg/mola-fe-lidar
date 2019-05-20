@@ -195,8 +195,7 @@ void LidarOdometry3D::initialize(const std::string& cfg_block)
     YAML_LOAD_OPT(params_, voxel_filter4planes_min_e2_e0, float);
     YAML_LOAD_OPT(params_, voxel_filter4planes_decimation, unsigned int);
 
-    YAML_LOAD_OPT(params_, voxel_filter4edges_max_e1_e0, float);
-    YAML_LOAD_OPT(params_, voxel_filter4edges_min_e2_e1, float);
+    YAML_LOAD_OPT(params_, voxel_filter4edges_keep_ratio, double);
     YAML_LOAD_OPT(params_, voxel_filter4edges_decimation, unsigned int);
 
     YAML_LOAD_OPT(params_, min_dist_to_matching, double);
@@ -979,6 +978,7 @@ void LidarOdometry3D::run_one_icp(const ICP_Input& in, ICP_Output& out)
             icp_params.pt2pt_layers["non_planar"s]   = 1.0;
             icp_params.pt2pt_layers["color_bright"s] = 5.0;
             // icp_params.pt2pt_layers["plane_points"s] = 0.1;
+            // icp_params.pt2pt_layers["plane_centroids"s] = 1.0;
             icp_params.pt2pt_layers["decim_full"s] =
                 params_.icp_full_decim_layer_weight;
 
@@ -1339,7 +1339,8 @@ LidarOdometry3D::lidar_scan_t LidarOdometry3D::filterPointCloud(
     }  // end for each voxel
 
     // Keep N best "edge"-like voxels:
-    const int vxmax = static_cast<int>(nNonEmptyVoxels * 0.4);
+    const int vxmax = static_cast<int>(
+        nNonEmptyVoxels * params_.voxel_filter4edges_keep_ratio);
 
     auto itScore = score2voxel.rbegin();
     for (int vxcount = 0; itScore != score2voxel.rend() && vxcount < vxmax;

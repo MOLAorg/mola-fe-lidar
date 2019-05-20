@@ -223,7 +223,14 @@ void PointsPlanesICP::align_OLAE(
         // pairings.robust_kernel_param = mrpt::DEG2RAD(0.05);
         // pairings.robust_kernel_scale = 1500.0;
 
-        olae_match(pairings, res);
+        if (pairings.paired_points.size() >= 3)
+        {
+            // Skip ill-defined problems if the no. of points is too small.
+            // There's no check for this inside olae_match() because it also
+            // handled lines, planes, etc. but we don't want to rely on that for
+            // this application.
+            olae_match(pairings, res);
+        }
 
         solution = mrpt::poses::CPose3D(res.optimal_pose);
 #else
@@ -262,7 +269,7 @@ void PointsPlanesICP::align_OLAE(
         result.terminationReason = IterTermReason::MaxIterations;
 
         // Ratio of points with a valid pairing:
-#if 0
+#if 1
     if (!layerOfLargestPc.empty())
         result.goodness = mres.at(layerOfLargestPc).correspondencesRatio;
 #else
@@ -377,11 +384,6 @@ static std::tuple<Eigen::Matrix3d, Eigen::Vector3d> olae_build_linear_system(
             bi = TVector3D(p.this_x, p.this_y, p.this_z) - ct_this;
             ri = TVector3D(p.other_x, p.other_y, p.other_z) - ct_other;
             const auto bi_n = bi.norm(), ri_n = ri.norm();
-            if (bi_n < 1e-8)
-            {
-                std::cout << "bi:" << bi.asString() << "\n";
-                std::cout << "nPts:" << nPoints << "\n";
-            }
             ASSERT_ABOVE_(bi_n, 1e-8);
             ASSERT_ABOVE_(ri_n, 1e-8);
             // (Note: ideally, both norms should be equal if noiseless and a
