@@ -353,8 +353,13 @@ static std::tuple<Eigen::Matrix3d, Eigen::Vector3d> olae_build_linear_system(
             bi = TVector3D(p.this_x, p.this_y, p.this_z) - ct_this;
             ri = TVector3D(p.other_x, p.other_y, p.other_z) - ct_other;
             const auto bi_n = bi.norm(), ri_n = ri.norm();
-            ASSERT_(bi_n > 1e-3);
-            ASSERT_(ri_n > 1e-3);
+            if (bi_n < 1e-8)
+            {
+                std::cout << "bi:" << bi.asString() << "\n";
+                std::cout << "nPts:" << nPoints << "\n";
+            }
+            ASSERT_ABOVE_(bi_n, 1e-8);
+            ASSERT_ABOVE_(ri_n, 1e-8);
             // (Note: ideally, both norms should be equal if noiseless and a
             // real pairing )
             bi *= 1.0 / bi_n;

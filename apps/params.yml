@@ -14,8 +14,9 @@ params:
     # Relative weight of full decimated point cloud in ICP:
     icp_full_decim_layer_weight: 0.1
     # Voxel filter: general params
-    voxel_filter_resolution: 1  # [meters]
-    voxel_filter_min_point_count: 10 # min. points count/voxel to accept
+    full_pointcloud_decimation: 0 # 0:disabled
+    voxel_filter_resolution: 2  # [meters]
+    voxel_filter_min_point_count: 50 # min. points count/voxel to accept
     voxel_filter_min_point_spacing: 0.02   # [meters]
     # Voxel filer for edges:
     voxel_filter4edges_decimation: 2
