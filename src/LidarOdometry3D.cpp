@@ -45,35 +45,52 @@ MRPT_INITIALIZER(do_register)
     MOLA_REGISTER_MODULE(LidarOdometry3D)
 
     // Register serializable classes:
-    mrpt::rtti::registerClass(CLASS_ID(mola::LidarOdometry3D::pointclouds_t));
+    mrpt::rtti::registerClass(CLASS_ID(mola::LidarOdometry3D::lidar_scan_t));
 }
 
-IMPLEMENTS_SERIALIZABLE(pointclouds_t, CSerializable, mola::LidarOdometry3D)
+IMPLEMENTS_SERIALIZABLE(lidar_scan_t, CSerializable, mola::LidarOdometry3D)
 
 //
-uint8_t LidarOdometry3D::pointclouds_t::serializeGetVersion() const { return 0; }
-void    LidarOdometry3D::pointclouds_t::serializeTo(
+uint8_t LidarOdometry3D::lidar_scan_t::serializeGetVersion() const { return 0; }
+void    LidarOdometry3D::lidar_scan_t::serializeTo(
     mrpt::serialization::CArchive& out) const
 {
-    out.WriteAs<uint32_t>(layers.size());
-    for (const auto& l : layers) out << l.first << l.second;
+    out << pc.lines;
+
+    out.WriteAs<uint32_t>(pc.planes.size());
+    for (const auto& p : pc.planes) out << p.plane << p.centroid;
+
+    out.WriteAs<uint32_t>(pc.lines.size());
+    for (const auto& l : pc.lines) out << l;
+
+    out.WriteAs<uint32_t>(pc.point_layers.size());
+    for (const auto& l : pc.point_layers) out << l.first << *l.second.get();
 }
-void LidarOdometry3D::pointclouds_t::serializeFrom(
+void LidarOdometry3D::lidar_scan_t::serializeFrom(
     mrpt::serialization::CArchive& in, uint8_t version)
 {
     switch (version)
     {
         case 0:
         {
-            uint32_t n = in.ReadAs<uint32_t>();
-            layers.clear();
-            for (size_t i = 0; i < n; i++)
+            in >> pc.lines;
+            const auto nPls = in.ReadAs<uint32_t>();
+            pc.planes.resize(nPls);
+            for (auto& pl : pc.planes) in >> pl.plane >> pl.centroid;
+
+            const auto nLins = in.ReadAs<uint32_t>();
+            pc.lines.resize(nLins);
+            for (auto& l : pc.lines) in >> l;
+
+            const auto nPts = in.ReadAs<uint32_t>();
+            pc.point_layers.clear();
+            for (std::size_t i = 0; i < nPts; i++)
             {
                 std::string name;
                 in >> name;
-                auto obj = in.ReadObject();
-                layers[name] =
-                    mrpt::ptr_cast<mrpt::maps::CPointsMap>::from(obj);
+                pc.point_layers[name] =
+                    mrpt::ptr_cast<mrpt::maps::CPointsMap>::from(
+                        in.ReadObject());
             }
         }
         break;
@@ -85,7 +102,7 @@ void LidarOdometry3D::pointclouds_t::serializeFrom(
 LidarOdometry3D::LidarOdometry3D() = default;
 
 static void load_icp_set_of_params(
-    std::vector<MultiCloudICP::Parameters>& out, YAML::Node& cfg,
+    std::vector<p2p2::Parameters>& out, YAML::Node& cfg,
     const std::string& prefix)
 {
     using namespace std::string_literals;
@@ -174,7 +191,7 @@ void LidarOdometry3D::initialize(const std::string& cfg_block)
     {
         ProfilerEntry tle(profiler_, "filterPointCloud_initialize");
         state_.filter_grid.resize(
-            {-50.0, -50.0, -10.0}, {50.0, 50.0, 10.0},
+            {-75, -75.0, -10.0}, {75.0, 75.0, 10.0},
             params_.voxel_filter_resolution);
     }
 
@@ -249,13 +266,13 @@ void LidarOdometry3D::doProcessNewObservation(CObservation::Ptr& o)
         }
 
         // Extract points from observation:
-        auto this_obs_points = pointclouds_t::Create();
+        auto this_obs_points = lidar_scan_t::Create();
         bool have_points;
         {
             ProfilerEntry tle(
                 profiler_, "doProcessNewObservation.1.obs2pointcloud");
 
-            const auto& pc = this_obs_points->layers["original"] =
+            const auto& pc = this_obs_points->pc.point_layers["original"] =
                 mrpt::maps::CSimplePointsMap::Create();
 
             have_points = pc->insertObservationPtr(o);
@@ -269,7 +286,7 @@ void LidarOdometry3D::doProcessNewObservation(CObservation::Ptr& o)
             filterPointCloud(*this_obs_points);
 
             // Remove the original, full-res point cloud to save memory:
-            this_obs_points->layers.erase("original");
+            this_obs_points->pc.point_layers.erase("original");
         }
 
         profiler_.enter("doProcessNewObservation.2b.copy_vars");
@@ -294,7 +311,7 @@ void LidarOdometry3D::doProcessNewObservation(CObservation::Ptr& o)
         bool create_keyframe = false;
 
         // First time we cannot do ICP since we need at least two pointclouds:
-        if (!last_points || last_points->layers.empty())
+        if (!last_points || last_points->pc.point_layers.empty())
         {
             // Skip ICP.
             MRPT_LOG_DEBUG("First pointcloud: skipping ICP.");
@@ -322,8 +339,8 @@ void LidarOdometry3D::doProcessNewObservation(CObservation::Ptr& o)
                 0, 0);
             MRPT_TODO("do omega_xyz part!");
 
-            icp_in.to_pc   = this_obs_points;
-            icp_in.from_pc = last_points;
+            icp_in.to_pc   = this_obs_points->pc;
+            icp_in.from_pc = last_points->pc;
             icp_in.from_id = state_.last_kf;
             icp_in.to_id =
                 mola::INVALID_ID;  // current data, not a new KF (yet)
@@ -683,15 +700,18 @@ void LidarOdometry3D::checkForNearbyKFs()
                 ProfilerEntry tle(
                     profiler_, "checkForNearbyKFs.readPCsFromWorldModel");
 
-                d->to_pc = mrpt::ptr_cast<pointclouds_t>::from(
-                    worldmodel_->entity_annotations_by_id(d->to_id)
-                        .at(ANNOTATION_NAME_PC_LAYERS)
-                        .value());
+                d->to_pc = mrpt::ptr_cast<lidar_scan_t>::from(
+                               worldmodel_->entity_annotations_by_id(d->to_id)
+                                   .at(ANNOTATION_NAME_PC_LAYERS)
+                                   .value())
+                               ->pc;
 
-                d->from_pc = mrpt::ptr_cast<pointclouds_t>::from(
-                    worldmodel_->entity_annotations_by_id(d->from_id)
-                        .at(ANNOTATION_NAME_PC_LAYERS)
-                        .value());
+                d->from_pc =
+                    mrpt::ptr_cast<lidar_scan_t>::from(
+                        worldmodel_->entity_annotations_by_id(d->from_id)
+                            .at(ANNOTATION_NAME_PC_LAYERS)
+                            .value())
+                        ->pc;
             }
 
             worldmodel_->entities_unlock_for_read();
@@ -888,15 +908,26 @@ void LidarOdometry3D::run_one_icp(const ICP_Input& in, ICP_Output& out)
 
         ASSERT_(!in.icp_params.empty());
 
-        size_t                  largest_pc_count = 1;
-        MultiCloudICP::clouds_t pcs_from, pcs_to;
-        for (auto& layer : in.from_pc->layers)
+        size_t largest_pc_count = 1;
+#if 0
+        p2p2::MultiCloudICP::clouds_t pcs_from, pcs_to;
+        for (auto& layer : in.from_pc.point_layers)
         {
             pcs_from.push_back(layer.second);
-            pcs_to.push_back(in.to_pc->layers.at(layer.first));
+            pcs_to.push_back(in.to_pc.point_layers.at(layer.first));
 
             mrpt::keep_max(largest_pc_count, layer.second->size());
         }
+#else
+        const auto& pcs_from = in.from_pc;
+        const auto& pcs_to   = in.to_pc;
+
+        for (auto& layer : in.from_pc.point_layers)
+        {
+            //
+            mrpt::keep_max(largest_pc_count, layer.second->size());
+        }
+#endif
 
         unsigned int decim = 1;
         if (params_.decimate_to_point_count > 0)
@@ -907,16 +938,32 @@ void LidarOdometry3D::run_one_icp(const ICP_Input& in, ICP_Output& out)
 
         for (unsigned int stage = 0; stage < in.icp_params.size(); stage++)
         {
+            p2p2::Results icp_result;
+
             MRPT_LOG_DEBUG_STREAM(
                 "MRPT ICP: max point count=" << largest_pc_count
                                              << " decimation=" << decim);
 
-            MultiCloudICP::Parameters icp_params       = in.icp_params[stage];
+#if 0
+            auto icp_params = in.icp_params[stage];
+
             icp_params.corresponding_points_decimation = decim;
 
-            MultiCloudICP::Results icp_result;
-            MultiCloudICP::align(
+            p2p2::MultiCloudICP::align(
                 pcs_from, pcs_to, current_solution, icp_params, icp_result);
+#else
+            auto icp_params = in.icp_params[stage];
+
+            icp_params.pt2pt_layers.clear();
+            icp_params.pt2pt_layers["edges"s]      = 1.0;
+            icp_params.pt2pt_layers["planes"s]     = 1.0;
+            icp_params.pt2pt_layers["full_decim"s] = 0.2;
+            // icp_params.pt2pt_layers["decim_full"s] = icp_params.pt2pl_layer =
+            // "plane_points"s;
+
+            p2p2::PointsPlanesICP::align_OLAE(
+                pcs_from, pcs_to, current_solution, icp_params, icp_result);
+#endif
 
             if (icp_result.goodness > 0)
             {
@@ -953,7 +1000,7 @@ void LidarOdometry3D::run_one_icp(const ICP_Input& in, ICP_Output& out)
 
     if (gen_debug)
     {
-        const auto num_pc_layers = in.from_pc->layers.size();
+        const auto num_pc_layers = in.from_pc.point_layers.size();
         debug_dump_icp_file_counter++;
 
         for (unsigned int l = 0; l < num_pc_layers; l++)
@@ -967,9 +1014,9 @@ void LidarOdometry3D::run_one_icp(const ICP_Input& in, ICP_Output& out)
             // Init:
             mrpt::opengl::COpenGLScene scene;
 
-            auto it_from = in.from_pc->layers.begin();
+            auto it_from = in.from_pc.point_layers.begin();
             std::advance(it_from, l);
-            auto it_to = in.to_pc->layers.begin();
+            auto it_to = in.to_pc.point_layers.begin();
             std::advance(it_to, l);
 
             scene.insert(
@@ -1095,18 +1142,18 @@ void LidarOdometry3D::run_one_icp(const ICP_Input& in, ICP_Output& out)
     MRPT_END
 }
 
-void LidarOdometry3D::filterPointCloud(pointclouds_t& pcs)
+void LidarOdometry3D::filterPointCloud(lidar_scan_t& pcs)
 {
     MRPT_START
 
     // Get a ref to the input, full resolution point cloud:
-    const auto& pcptr = pcs.layers["original"];
+    const auto& pcptr = pcs.pc.point_layers["original"];
     ASSERTMSG_(pcptr, "Missing point cloud layer: `original`");
     const auto& pc = *pcptr;
 
-    auto& pc_edges      = pcs.layers["edges"];
-    auto& pc_planes     = pcs.layers["planes"];
-    auto& pc_full_decim = pcs.layers["full_decim"];
+    auto& pc_edges      = pcs.pc.point_layers["edges"];
+    auto& pc_planes     = pcs.pc.point_layers["planes"];
+    auto& pc_full_decim = pcs.pc.point_layers["full_decim"];
     if (!pc_edges) pc_edges = mrpt::maps::CSimplePointsMap::Create();
     if (!pc_planes) pc_planes = mrpt::maps::CSimplePointsMap::Create();
     if (!pc_full_decim) pc_full_decim = mrpt::maps::CSimplePointsMap::Create();

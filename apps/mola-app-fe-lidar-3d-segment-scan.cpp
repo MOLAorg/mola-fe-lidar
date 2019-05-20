@@ -75,8 +75,8 @@ void do_scan_segment_test()
 
     module.initialize(str_params);
 
-    mola::LidarOdometry3D::pointclouds_t pcs;
-    pcs.layers["original"] = pc;
+    mola::LidarOdometry3D::lidar_scan_t pcs;
+    pcs.pc.point_layers["original"] = pc;
 
     {
         mrpt::system::CTimeLoggerEntry tle(timlog, "filterPointCloud");
@@ -87,7 +87,7 @@ void do_scan_segment_test()
     // Display "layers":
     std::map<std::string, mrpt::gui::CDisplayWindow3D::Ptr> wins;
     int                                                     x = 5, y = 5;
-    for (const auto& layer : pcs.layers)
+    for (const auto& layer : pcs.pc.point_layers)
     {
         const auto name = layer.first;
 
