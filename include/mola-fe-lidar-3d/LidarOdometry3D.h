@@ -86,7 +86,7 @@ class LidarOdometry3D : public FrontEndBase
         /** ICP parameters for the case of having, or not, a good velocity model
          * that works a good prior. Each entry in the vector is an "ICP stage",
          * to be run as a sequence of coarser to finer detail */
-        std::vector<MultiCloudICP::Parameters> icp_params_with_vel,
+        std::vector<p2p2::Parameters> icp_params_with_vel,
             icp_params_without_vel, icp_params_loopclosure;
 
         /** Generate render visualization decoration for every N keyframes */
@@ -103,21 +103,21 @@ class LidarOdometry3D : public FrontEndBase
 
     using topological_dist_t = std::size_t;
 
-    struct pointclouds_t : public mrpt::serialization::CSerializable
+    /** Different "layers" in which a point cloud is decomposed.
+     * For example: "edges", "planes", etc.
+     */
+    struct lidar_scan_t : public mrpt::serialization::CSerializable
     {
-        DEFINE_SERIALIZABLE(pointclouds_t)
+        DEFINE_SERIALIZABLE(lidar_scan_t)
        public:
-        /** Different "layers" in which a point cloud is decomposed.
-         * For example: "edges", "planes", etc.
-         */
-        std::map<std::string, mrpt::maps::CPointsMap::Ptr> layers;
+        p2p2::PointsPlanesICP::pointcloud_t pc;
 
         inline bool hasLayer(const std::string& s) const
         {
-            return layers.find(s) != layers.end();
+            return pc.point_layers.find(s) != pc.point_layers.end();
         }
     };
-    void filterPointCloud(pointclouds_t& pcs);
+    void filterPointCloud(lidar_scan_t& pcs);
 
     enum class AlignKind : uint8_t
     {
@@ -130,13 +130,13 @@ class LidarOdometry3D : public FrontEndBase
     {
         using Ptr = std::shared_ptr<ICP_Input>;
 
-        AlignKind           align_kind{AlignKind::LidarOdometry};
-        id_t                to_id{mola::INVALID_ID};
-        id_t                from_id{mola::INVALID_ID};
-        pointclouds_t::Ptr  to_pc, from_pc;
-        mrpt::math::TPose3D init_guess_to_wrt_from;
+        AlignKind align_kind{AlignKind::LidarOdometry};
+        id_t      to_id{mola::INVALID_ID};
+        id_t      from_id{mola::INVALID_ID};
+        p2p2::PointsPlanesICP::pointcloud_t to_pc, from_pc;
+        mrpt::math::TPose3D                 init_guess_to_wrt_from;
 
-        std::vector<MultiCloudICP::Parameters> icp_params;
+        std::vector<p2p2::Parameters> icp_params;
 
         /** used to identity where does this request come from */
         std::string debug_str;
@@ -159,7 +159,7 @@ class LidarOdometry3D : public FrontEndBase
     struct MethodState
     {
         mrpt::Clock::time_point last_obs_tim{};
-        pointclouds_t::Ptr      last_points{};
+        lidar_scan_t::Ptr       last_points{};
         mrpt::math::TTwist3D    last_iter_twist;
         bool                    last_iter_twist_is_good{false};
         id_t                    last_kf{mola::INVALID_ID};

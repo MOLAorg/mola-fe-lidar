@@ -46,6 +46,13 @@ static TCLAP::ValueArg<int> arg_icp_params_set(
     "2=loop-closure",
     true, 0, "0", cmd);
 
+static TCLAP::ValueArg<std::string> arg_init_pose(
+    "p", "pose-guess", "Initial guess for the relative pose", false,
+    "[0 0 0 0 0 0]", "(x,y,z [m] yaw pitch roll [deg])", cmd);
+
+static TCLAP::SwitchArg arg_no_gui(
+    "", "no-gui", "Disables the gui (Default: NO)", cmd);
+
 static mrpt::system::CTimeLogger timlog;
 
 void do_scan_align_test()
@@ -86,15 +93,15 @@ void do_scan_align_test()
 
     module.initialize(str_params);
 
-    mola::LidarOdometry3D::pointclouds_t pcs1;
-    pcs1.layers["original"] = pc1;
+    mola::LidarOdometry3D::lidar_scan_t pcs1;
+    pcs1.pc.point_layers["original"] = pc1;
     {
         mrpt::system::CTimeLoggerEntry tle(timlog, "filterPointCloud");
         module.filterPointCloud(pcs1);
     }
 
-    mola::LidarOdometry3D::pointclouds_t pcs2;
-    pcs2.layers["original"] = pc2;
+    mola::LidarOdometry3D::lidar_scan_t pcs2;
+    pcs2.pc.point_layers["original"] = pc2;
     {
         mrpt::system::CTimeLoggerEntry tle(timlog, "filterPointCloud");
         module.filterPointCloud(pcs2);
@@ -102,15 +109,13 @@ void do_scan_align_test()
 
     // Send to ICP all layers except "original":
     mola::LidarOdometry3D::ICP_Input icp_in;
-    icp_in.to_pc   = mola::LidarOdometry3D::pointclouds_t::Create();
-    icp_in.from_pc = mola::LidarOdometry3D::pointclouds_t::Create();
 
-    for (const auto& l : pcs1.layers)
+    for (const auto& l : pcs1.pc.point_layers)
         if (l.first.compare("original") != 0)
-            icp_in.from_pc->layers[l.first] = l.second;
-    for (const auto& l : pcs2.layers)
+            icp_in.from_pc.point_layers[l.first] = l.second;
+    for (const auto& l : pcs2.pc.point_layers)
         if (l.first.compare("original") != 0)
-            icp_in.to_pc->layers[l.first] = l.second;
+            icp_in.to_pc.point_layers[l.first] = l.second;
 
     // Select ICP configuration parameter set:
     switch (arg_icp_params_set.getValue())
@@ -131,6 +136,9 @@ void do_scan_align_test()
             throw std::invalid_argument("icp-params-set: invalid value.");
     }
 
+    // Set initial guess:
+    icp_in.init_guess_to_wrt_from.fromString(arg_init_pose.getValue());
+
     mola::LidarOdometry3D::ICP_Output icp_out;
     module.setVerbosityLevel(mrpt::system::LVL_DEBUG);
     {
@@ -138,10 +146,17 @@ void do_scan_align_test()
         module.run_one_icp(icp_in, icp_out);
     }
 
+    std::cout << "Align results:\n"
+                 " - found_pose_to_wrt_from:"
+              << icp_out.found_pose_to_wrt_from.asString() << "\n"
+              << " - goodness: " << icp_out.goodness << "\n";
+
+    if (arg_no_gui.isSet()) return;
+
     // Display "layers":
     std::map<std::string, mrpt::gui::CDisplayWindow3D::Ptr> wins;
     int                                                     x = 5, y = 5;
-    for (const auto& layer : pcs1.layers)
+    for (const auto& layer : pcs1.pc.point_layers)
     {
         const auto name = layer.first;
 
@@ -162,9 +177,9 @@ void do_scan_align_test()
             scene->insert(gl_pc1);
 
             auto gl_pc2 = mrpt::opengl::CSetOfObjects::Create();
-            pcs2.layers.at(layer.first)->renderOptions.color =
+            pcs2.pc.point_layers.at(layer.first)->renderOptions.color =
                 mrpt::img::TColorf(0, 0, 1);
-            pcs2.layers.at(layer.first)->getAs3DObject(gl_pc2);
+            pcs2.pc.point_layers.at(layer.first)->getAs3DObject(gl_pc2);
             gl_pc2->setPose(icp_out.found_pose_to_wrt_from.mean);
             scene->insert(gl_pc2);
 
@@ -179,11 +194,6 @@ void do_scan_align_test()
         }
         win->repaint();
     }
-
-    std::cout << "Align results:\n"
-                 " - found_pose_to_wrt_from:"
-              << icp_out.found_pose_to_wrt_from.asString() << "\n"
-              << " - goodness: " << icp_out.goodness << "\n";
 
     std::cout << "Close windows or hit a key on first window to quit.\n";
     if (!wins.empty()) wins.begin()->second->waitForKey();
