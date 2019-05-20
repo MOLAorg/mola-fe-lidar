@@ -12,6 +12,8 @@ void PointCloudToVoxelGrid::resize(
     const mrpt::math::TPoint3D& min_corner,
     const mrpt::math::TPoint3D& max_corner, const float voxel_size)
 {
+    MRPT_START
+
     pts_voxels.clear();
     pts_voxels.setSize(
         min_corner.x, max_corner.x, min_corner.y, max_corner.y, min_corner.z,
@@ -20,6 +22,8 @@ void PointCloudToVoxelGrid::resize(
     voxel_is_empty_.assign(pts_voxels.getVoxelCount(), true);
     used_voxel_indices.clear();
     used_voxel_indices.reserve(pts_voxels.getVoxelCount() / 4);
+
+    MRPT_END
 }
 
 void PointCloudToVoxelGrid::processPointCloud(const mrpt::maps::CPointsMap& p)

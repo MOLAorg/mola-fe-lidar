@@ -227,7 +227,7 @@ void do_scan_align_test()
             p2p2::PointsPlanesICP::render_params_t pl1_render;
             pl1_render.plane_color = mrpt::img::TColor(0xff, 0x00, 0x00);
             pl1_render.plane_half_width =
-                module.params_.voxel_filter4planes_resolution * 0.5f;
+                module.params_.voxel_filter_resolution * 0.5f;
             pl1_render.plane_grid_spacing = pl1_render.plane_half_width * 0.45f;
 
             auto gl_planes1 = mrpt::opengl::CSetOfObjects::Create();
@@ -239,7 +239,7 @@ void do_scan_align_test()
             p2p2::PointsPlanesICP::render_params_t pl2_render;
             pl2_render.plane_color = mrpt::img::TColor(0x00, 0x00, 0xff);
             pl2_render.plane_half_width =
-                module.params_.voxel_filter4planes_resolution * 0.5f;
+                module.params_.voxel_filter_resolution * 0.5f;
             pl2_render.plane_grid_spacing = pl2_render.plane_half_width * 0.45f;
 
             auto gl_planes2 = mrpt::opengl::CSetOfObjects::Create();

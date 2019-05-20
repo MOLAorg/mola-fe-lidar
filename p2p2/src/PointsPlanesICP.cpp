@@ -209,6 +209,7 @@ void PointsPlanesICP::align_OLAE(
         // Compute the optimal pose, using the OLAE method
         // (Optimal linear attitude estimator)
         // ------------------------------------------------
+#if 1
         OLAE_Match_Result res;
 
         // Weights: translation => trust points; attitude => trust planes
@@ -225,6 +226,14 @@ void PointsPlanesICP::align_OLAE(
         olae_match(pairings, res);
 
         solution = mrpt::poses::CPose3D(res.optimal_pose);
+#else
+        mrpt::poses::CPose3DQuat estPoseQuat;
+        double                   transf_scale;
+        mrpt::tfest::se3_l2(
+            pairings.paired_points, estPoseQuat, transf_scale,
+            true /* DO force rigid transformation (scale=1) */);
+        solution = mrpt::poses::CPose3D(estPoseQuat);
+#endif
 
         // If matching has not changed, we are done:
         const auto                        deltaSol = solution - prev_solution;

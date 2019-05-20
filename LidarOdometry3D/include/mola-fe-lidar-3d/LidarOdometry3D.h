@@ -62,22 +62,22 @@ class LidarOdometry3D : public FrontEndBase
         /** Minimum ICP quality for a loop closure to be accepted */
         double min_icp_goodness_lc{0.6};
 
+        double icp_plane_layer_weight{1.0};
+
         /** For the OLAE alignment algorithm, the relative weight of planes for
          * optimal attitude solution */
         double olae_relative_weight_planes_attitude{1.0};
 
         /** Params for the voxel filters */
-        double       voxel_filter4planes_resolution{2.};
-        double       voxel_filter4planes_min_point_spacing{0.10};
-        unsigned int voxel_filter4planes_min_point_count{20};
+        double       voxel_filter_resolution{2.};
+        double       voxel_filter_min_point_spacing{0.10};
+        unsigned int voxel_filter_min_point_count{20};
+
         float        voxel_filter4planes_min_e1_e0{100.f};
         float        voxel_filter4planes_min_e2_e0{100.f};
         unsigned int voxel_filter4planes_decimation{1};
 
-        double       voxel_filter4edges_resolution{.5};
-        double       voxel_filter4edges_min_point_spacing{0.10};
         unsigned int voxel_filter4edges_decimation{1};
-        unsigned int voxel_filter4edges_min_point_count{20};
         float        voxel_filter4edges_max_e1_e0{10.f};
         float        voxel_filter4edges_min_e2_e1{10.f};
 
@@ -176,8 +176,7 @@ class LidarOdometry3D : public FrontEndBase
         bool                        last_iter_twist_is_good{false};
         id_t                        last_kf{mola::INVALID_ID};
         mrpt::poses::CPose3D        accum_since_last_kf{};
-        p2p2::PointCloudToVoxelGrid filter_grid4planes;
-        p2p2::PointCloudToVoxelGrid filter_grid4edges;
+        p2p2::PointCloudToVoxelGrid filter_grid;
 
         // An auxiliary (local) pose-graph to use Dijkstra and find guesses
         // for ICP against nearby past KFs:

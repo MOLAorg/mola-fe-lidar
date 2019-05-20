@@ -182,21 +182,20 @@ void LidarOdometry3D::initialize(const std::string& cfg_block)
     YAML_LOAD_OPT(params_, min_icp_goodness, double);
     YAML_LOAD_OPT(params_, min_icp_goodness_lc, double);
 
+    YAML_LOAD_OPT(params_, icp_plane_layer_weight, double);
     YAML_LOAD_OPT(params_, olae_relative_weight_planes_attitude, double);
 
-    YAML_LOAD_OPT(params_, voxel_filter4planes_resolution, double);
-    YAML_LOAD_OPT(params_, voxel_filter4planes_min_point_count, unsigned int);
+    YAML_LOAD_OPT(params_, voxel_filter_resolution, double);
+    YAML_LOAD_OPT(params_, voxel_filter_min_point_spacing, double);
+    YAML_LOAD_OPT(params_, voxel_filter_min_point_count, unsigned int);
+
     YAML_LOAD_OPT(params_, voxel_filter4planes_min_e1_e0, float);
     YAML_LOAD_OPT(params_, voxel_filter4planes_min_e2_e0, float);
-    YAML_LOAD_OPT(params_, voxel_filter4planes_min_point_spacing, double);
     YAML_LOAD_OPT(params_, voxel_filter4planes_decimation, unsigned int);
 
-    YAML_LOAD_OPT(params_, voxel_filter4edges_resolution, double);
-    YAML_LOAD_OPT(params_, voxel_filter4edges_min_point_count, unsigned int);
     YAML_LOAD_OPT(params_, voxel_filter4edges_max_e1_e0, float);
     YAML_LOAD_OPT(params_, voxel_filter4edges_min_e2_e1, float);
     YAML_LOAD_OPT(params_, voxel_filter4edges_decimation, unsigned int);
-    YAML_LOAD_OPT(params_, voxel_filter4edges_min_point_spacing, double);
 
     YAML_LOAD_OPT(params_, min_dist_to_matching, double);
     YAML_LOAD_OPT(params_, max_dist_to_matching, double);
@@ -221,18 +220,12 @@ void LidarOdometry3D::initialize(const std::string& cfg_block)
 
     {
         ProfilerEntry tle(profiler_, "filterPointCloud_initialize");
-        state_.filter_grid4planes.resize(
-            {-90.0, -90.0, -10.0}, {90.0, 90.0, 10.0},
-            params_.voxel_filter4planes_resolution);
+        state_.filter_grid.resize(
+            {-65.0, -65.0, -8.0}, {65.0, 65.0, 8.0},
+            params_.voxel_filter_resolution);
 
-        state_.filter_grid4edges.resize(
-            {-90.0, -90.0, -10.0}, {90.0, 90.0, 10.0},
-            params_.voxel_filter4edges_resolution);
-
-        state_.filter_grid4planes.params_.min_consecutive_distance =
-            params_.voxel_filter4planes_min_point_spacing;
-        state_.filter_grid4edges.params_.min_consecutive_distance =
-            params_.voxel_filter4edges_min_point_spacing;
+        state_.filter_grid.params_.min_consecutive_distance =
+            params_.voxel_filter_min_point_spacing;
     }
 
     // attach to world model, if present:
@@ -1232,24 +1225,20 @@ LidarOdometry3D::lidar_scan_t LidarOdometry3D::filterPointCloud(
     // pc_plane_centroids->reserve(pc.size() / 1000);
     pc_plane_points->reserve(pc.size() / 200);
 
-    state_.filter_grid4edges.clear();
-    state_.filter_grid4edges.processPointCloud(pc);
-
-    state_.filter_grid4planes.clear();
-    state_.filter_grid4planes.processPointCloud(pc);
+    state_.filter_grid.clear();
+    state_.filter_grid.processPointCloud(pc);
 
     const auto& xs = pc.getPointsBufferRef_x();
     const auto& ys = pc.getPointsBufferRef_y();
     const auto& zs = pc.getPointsBufferRef_z();
 
     std::size_t nEdgeVoxels = 0, nPlaneVoxels = 0;
-    for (const auto vxl_idx : state_.filter_grid4edges.used_voxel_indices)
+    for (const auto vxl_idx : state_.filter_grid.used_voxel_indices)
     {
         const auto& vxl_pts =
-            state_.filter_grid4edges.pts_voxels.cellByIndex(vxl_idx);
+            state_.filter_grid.pts_voxels.cellByIndex(vxl_idx);
 
-        if (vxl_pts->indices.size() <
-            params_.voxel_filter4edges_min_point_count)
+        if (vxl_pts->indices.size() < params_.voxel_filter_min_point_count)
             continue;
 
         // Analyze the voxel contents:
@@ -1288,32 +1277,6 @@ LidarOdometry3D::lidar_scan_t LidarOdometry3D::filterPointCloud(
                 }
             }
         }
-    }  // end for each voxel
-
-    // Planes:
-    for (const auto vxl_idx : state_.filter_grid4planes.used_voxel_indices)
-    {
-        const auto& vxl_pts =
-            state_.filter_grid4planes.pts_voxels.cellByIndex(vxl_idx);
-
-        if (vxl_pts->indices.size() <
-            params_.voxel_filter4planes_min_point_count)
-            continue;
-
-        // Analyze the voxel contents:
-        mrpt::math::TPoint3Df mean;
-        Eigen::Matrix3f       cov;
-        pointcloud_centroid_covariance(xs, ys, zs, *vxl_pts, mean, cov);
-
-        // This only looks at the lower-triangular part of the cov
-        // matrix (which is(was->fixed via PR) wrong in loam_velodyne!)
-        Eigen::SelfAdjointEigenSolver<Eigen::Matrix3f> esolver(cov);
-
-        const Eigen::Vector3f eig_vals = esolver.eigenvalues();
-        // The eigenvalues are sorted in increasing order.
-        const float e0 = eig_vals[0], e1 = eig_vals[1], e2 = eig_vals[2];
-
-        const Eigen::Vector3f ev0 = esolver.eigenvectors().col(0);
 
         if (e1 > params_.voxel_filter4planes_min_e1_e0 * e0 &&
             e2 > params_.voxel_filter4planes_min_e2_e0 * e0)
@@ -1326,6 +1289,7 @@ LidarOdometry3D::lidar_scan_t LidarOdometry3D::filterPointCloud(
             const auto pl_c = mrpt::math::TPoint3D(mean);
 
             // Normal = largest eigenvector:
+            const Eigen::Vector3f ev0 = esolver.eigenvectors().col(0);
             auto pl_n = mrpt::math::TVector3D(ev0.x(), ev0.y(), ev0.z());
 
             // Normal direction criterion: make it to face towards the vehicle.

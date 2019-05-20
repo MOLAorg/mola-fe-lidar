@@ -175,7 +175,7 @@ void do_scan_segment_test()
             auto gl_planes1 = mrpt::opengl::CSetOfObjects::Create();
             p2p2::PointsPlanesICP::render_params_t render;
             render.plane_half_width =
-                module.params_.voxel_filter4planes_resolution * 0.5;
+                module.params_.voxel_filter_resolution * 0.5;
             render.plane_grid_spacing = 0.25 * render.plane_half_width;
             scan.pc.planesAsRenderizable(*gl_planes1, render);
             scene->insert(gl_planes1);
