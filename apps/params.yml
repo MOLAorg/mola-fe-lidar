@@ -31,11 +31,11 @@ params:
     max_dist_to_matching: 20.0
     # Params for the ICP algoritm: See mrpt::slam::CICP for documentation
     # Case: WITH a good twist (velocity) model:
-    icp_params_with_vel.maxIterations:     8      50      10
+    icp_params_with_vel.maxIterations:     8      50      5
     icp_params_with_vel.thresholdDist:     1.0     0.75   0.50    # [meters]
     icp_params_with_vel.thresholdAng:      2.0     0.5    0.1   # [deg]
     icp_params_with_vel.useRobustKernel:   0       1      1
-    icp_params_with_vel.maxPairsPerLayer:  100     200    5000
+    icp_params_with_vel.maxPairsPerLayer:  100     200    20000
     # Case: WITHOUT a good twist (velocity) model:
     icp_params_without_vel.maxIterations:   8      50   5
     icp_params_without_vel.thresholdDist:   3.0    0.75 0.5  # [meters]
@@ -44,7 +44,7 @@ params:
     icp_params_without_vel.maxPairsPerLayer: 100   200   20000
     # Case: Loop closure
     loop_closure_montecarlo_samples: 5
-    icp_params_loopclosure.maxIterations:   10    40      20
+    icp_params_loopclosure.maxIterations:   10    40      5
     icp_params_loopclosure.thresholdDist:   30.0   1.0    0.75  # [meters]
     icp_params_loopclosure.thresholdAng:     5.0   1.0    0.5  # [deg]
     icp_params_loopclosure.useRobustKernel:  0     0      1

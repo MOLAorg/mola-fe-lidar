@@ -64,6 +64,8 @@ class LidarOdometry3D : public FrontEndBase
 
         double icp_plane_layer_weight{1.0};
 
+        unsigned int full_pointcloud_decimation{10};
+
         /** For the OLAE alignment algorithm, the relative weight of planes for
          * optimal attitude solution */
         double olae_relative_weight_planes_attitude{1.0};

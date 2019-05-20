@@ -185,6 +185,8 @@ void LidarOdometry3D::initialize(const std::string& cfg_block)
     YAML_LOAD_OPT(params_, icp_plane_layer_weight, double);
     YAML_LOAD_OPT(params_, olae_relative_weight_planes_attitude, double);
 
+    YAML_LOAD_OPT(params_, full_pointcloud_decimation, unsigned int);
+
     YAML_LOAD_OPT(params_, voxel_filter_resolution, double);
     YAML_LOAD_OPT(params_, voxel_filter_min_point_spacing, double);
     YAML_LOAD_OPT(params_, voxel_filter_min_point_count, unsigned int);
@@ -976,7 +978,8 @@ void LidarOdometry3D::run_one_icp(const ICP_Input& in, ICP_Output& out)
             icp_params.pt2pt_layers.clear();
             icp_params.pt2pt_layers["non_planar"s]   = 1.0;
             icp_params.pt2pt_layers["color_bright"s] = 5.0;
-            icp_params.pt2pt_layers["plane_points"s] = 0.1;
+            // icp_params.pt2pt_layers["plane_points"s] = 0.1;
+            icp_params.pt2pt_layers["decim_full"s] = 0.2;
 
             icp_params.pt2pl_layer = "plane_points"s;
 
@@ -1210,20 +1213,24 @@ LidarOdometry3D::lidar_scan_t LidarOdometry3D::filterPointCloud(
     auto& pc_nonplanar = scan.pc.point_layers["non_planar"];
     // auto& pc_plane_centroids = scan.pc.point_layers["plane_centroids"];
     auto& pc_color_bright = scan.pc.point_layers["color_bright"];
-    auto& pc_plane_points = scan.pc.point_layers["plane_points"];
-    auto& planes          = scan.pc.planes;
+    // auto& pc_plane_points = scan.pc.point_layers["plane_points"];
+    auto& pc_decim_full = scan.pc.point_layers["decim_full"];
+
+    auto& planes = scan.pc.planes;
 
     auto pc_xyzi = dynamic_cast<const mrpt::maps::CPointsMapXYZI*>(&pc);
 
     pc_nonplanar = mrpt::maps::CSimplePointsMap::Create();
     // pc_plane_centroids = mrpt::maps::CSimplePointsMap::Create();
     pc_color_bright = mrpt::maps::CSimplePointsMap::Create();
-    pc_plane_points = mrpt::maps::CSimplePointsMap::Create();
+    // pc_plane_points = mrpt::maps::CSimplePointsMap::Create();
+    pc_decim_full = mrpt::maps::CSimplePointsMap::Create();
 
     pc_nonplanar->reserve(pc.size() / 10);
     planes.reserve(pc.size() / 1000);
     // pc_plane_centroids->reserve(pc.size() / 1000);
-    pc_plane_points->reserve(pc.size() / 200);
+    // pc_plane_points->reserve(pc.size() / 200);
+    pc_decim_full->reserve(pc.size() / 10);
 
     state_.filter_grid.clear();
     state_.filter_grid.processPointCloud(pc);
@@ -1237,6 +1244,16 @@ LidarOdometry3D::lidar_scan_t LidarOdometry3D::filterPointCloud(
     {
         const auto& vxl_pts =
             state_.filter_grid.pts_voxels.cellByIndex(vxl_idx);
+
+        // Full decimated pointcloud:
+        for (size_t i = 0; i < vxl_pts->indices.size(); i++)
+        {
+            const auto pt_idx = vxl_pts->indices[i];
+            const auto ptx = xs[pt_idx], pty = ys[pt_idx], ptz = zs[pt_idx];
+
+            if ((i % params_.full_pointcloud_decimation) == 0)
+                pc_decim_full->insertPointFast(ptx, pty, ptz);
+        }
 
         if (vxl_pts->indices.size() < params_.voxel_filter_min_point_count)
             continue;
@@ -1314,6 +1331,7 @@ LidarOdometry3D::lidar_scan_t LidarOdometry3D::filterPointCloud(
             // Also: add the centroid to this special layer:
             // pc_plane_centroids->insertPointFast(pl_c.x, pl_c.y, pl_c.z);
 
+#if 0
             // Also, keep original plane points in an independent layer:
             for (size_t i = 0; i < vxl_pts->indices.size(); i++)
             {
@@ -1322,6 +1340,7 @@ LidarOdometry3D::lidar_scan_t LidarOdometry3D::filterPointCloud(
                 if ((i % params_.voxel_filter4planes_decimation) == 0)
                     pc_plane_points->insertPointFast(ptx, pty, ptz);
             }
+#endif
         }
 
     }  // end for each voxel
@@ -1331,7 +1350,8 @@ LidarOdometry3D::lidar_scan_t LidarOdometry3D::filterPointCloud(
     pc_color_bright->mark_as_modified();
     pc_nonplanar->mark_as_modified();
     // pc_plane_centroids->mark_as_modified();
-    pc_plane_points->mark_as_modified();
+    // pc_plane_points->mark_as_modified();
+    pc_decim_full->mark_as_modified();
 
     MRPT_LOG_DEBUG_STREAM(
         "[VoxelGridFilter] Voxel counts:\n"
