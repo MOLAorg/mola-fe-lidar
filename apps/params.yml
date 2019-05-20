@@ -10,11 +10,11 @@ params:
     # ditto, for loop-closures attempts to align
     min_icp_goodness_lc: 0.75     # range [0,1]
     #
-    olae_relative_weight_planes_attitude: 10.0
+    olae_relative_weight_planes_attitude: 1.0
     # Relative weight of full decimated point cloud in ICP:
     icp_full_decim_layer_weight: 0.1
     # Voxel filter: general params
-    full_pointcloud_decimation: 30 # 0:disabled
+    full_pointcloud_decimation: 0 # 0:disabled
     voxel_filter_resolution: 1  # [meters]
     voxel_filter_min_point_count: 50 # min. points count/voxel to accept
     voxel_filter_min_point_spacing: 0.02   # [meters]
@@ -31,13 +31,13 @@ params:
     max_dist_to_matching: 20.0
     # Params for the ICP algoritm: See mrpt::slam::CICP for documentation
     # Case: WITH a good twist (velocity) model:
-    icp_params_with_vel.maxIterations:     8      50      4
+    icp_params_with_vel.maxIterations:     50     50    50
     icp_params_with_vel.thresholdDist:     1.0     0.75   0.50    # [meters]
     icp_params_with_vel.thresholdAng:      2.0     0.5    0.1   # [deg]
     icp_params_with_vel.useRobustKernel:   0       1      1
-    icp_params_with_vel.maxPairsPerLayer:  100     200    5000
+    icp_params_with_vel.maxPairsPerLayer:  200     200    5000
     # Case: WITHOUT a good twist (velocity) model:
-    icp_params_without_vel.maxIterations:   8      50   4
+    icp_params_without_vel.maxIterations:   50     50    50
     icp_params_without_vel.thresholdDist:   3.0    0.75 0.5  # [meters]
     icp_params_without_vel.thresholdAng:    3.0    0.5  0.5 # [deg]
     icp_params_without_vel.useRobustKernel:  0     1     1
