@@ -1085,6 +1085,8 @@ void LidarOdometry3D::run_one_icp(const ICP_Input& in, ICP_Output& out)
                 gl_info2->setString(ss.str());
             }
 
+            gl_to->setPose(in.init_guess_to_wrt_from);
+
             const auto fil_name_init = fil_name_prefix + "_0init.3Dscene"s;
             if (scene.saveToFile(fil_name_init))
                 MRPT_LOG_DEBUG_STREAM(
