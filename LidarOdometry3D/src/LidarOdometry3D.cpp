@@ -1245,7 +1245,9 @@ LidarOdometry3D::lidar_scan_t LidarOdometry3D::filterPointCloud(
     const auto& ys = pc.getPointsBufferRef_y();
     const auto& zs = pc.getPointsBufferRef_z();
 
-    std::size_t nEdgeVoxels = 0, nPlaneVoxels = 0;
+    std::map<double, std::size_t> score2voxel;
+
+    std::size_t nEdgeVoxels = 0, nPlaneVoxels = 0, nNonEmptyVoxels = 0;
     for (const auto vxl_idx : state_.filter_grid.used_voxel_indices)
     {
         const auto& vxl_pts =
@@ -1267,6 +1269,8 @@ LidarOdometry3D::lidar_scan_t LidarOdometry3D::filterPointCloud(
         if (vxl_pts->indices.size() < params_.voxel_filter_min_point_count)
             continue;
 
+        nNonEmptyVoxels++;
+
         // Analyze the voxel contents:
         mrpt::math::TPoint3Df mean;
         Eigen::Matrix3f       cov;
@@ -1279,30 +1283,8 @@ LidarOdometry3D::lidar_scan_t LidarOdometry3D::filterPointCloud(
         const Eigen::Vector3f eig_vals = esolver.eigenvalues();
         const float e0 = eig_vals[0], e1 = eig_vals[1], e2 = eig_vals[2];
 
-        if (e2 > params_.voxel_filter4edges_min_e2_e1 * e1 &&
-            e1 < params_.voxel_filter4edges_max_e1_e0 * e0)
-        {
-            // Classified as EDGE
-            // ------------------------
-            nEdgeVoxels++;
-            for (size_t i = 0; i < vxl_pts->indices.size(); i++)
-            {
-                const auto pt_idx = vxl_pts->indices[i];
-                const auto ptx = xs[pt_idx], pty = ys[pt_idx], ptz = zs[pt_idx];
-
-                if ((i % params_.voxel_filter4edges_decimation) == 0)
-                    pc_nonplanar->insertPointFast(ptx, pty, ptz);
-
-                if (pc_xyzi)
-                {
-                    MRPT_TODO("Dynamic thresholds?");
-                    const float pt_int =
-                        pc_xyzi->getPointIntensity_fast(pt_idx);
-                    if (pt_int > 0.75f)
-                        pc_color_bright->insertPointFast(ptx, pty, ptz);
-                }
-            }
-        }
+        const float score  = e2 * e0 / (e1 * e1);
+        score2voxel[score] = vxl_idx;
 
         if (e1 > params_.voxel_filter4planes_min_e1_e0 * e0 &&
             e2 > params_.voxel_filter4planes_min_e2_e0 * e0)
@@ -1353,6 +1335,38 @@ LidarOdometry3D::lidar_scan_t LidarOdometry3D::filterPointCloud(
         }
 
     }  // end for each voxel
+
+    // Keep N best "edge"-like voxels:
+    const int vxmax = static_cast<int>(nNonEmptyVoxels * 0.4);
+
+    auto itScore = score2voxel.rbegin();
+    for (int vxcount = 0; itScore != score2voxel.rend() && vxcount < vxmax;
+         ++itScore, vxcount++)
+    {
+        // Classified as EDGE
+        // ------------------------
+
+        const auto& vxl_pts =
+            state_.filter_grid.pts_voxels.cellByIndex(itScore->second);
+
+        nEdgeVoxels++;
+        for (size_t i = 0; i < vxl_pts->indices.size(); i++)
+        {
+            const auto pt_idx = vxl_pts->indices[i];
+            const auto ptx = xs[pt_idx], pty = ys[pt_idx], ptz = zs[pt_idx];
+
+            if ((i % params_.voxel_filter4edges_decimation) == 0)
+                pc_nonplanar->insertPointFast(ptx, pty, ptz);
+
+            if (pc_xyzi)
+            {
+                MRPT_TODO("Dynamic thresholds?");
+                const float pt_int = pc_xyzi->getPointIntensity_fast(pt_idx);
+                if (pt_int > 0.75f)
+                    pc_color_bright->insertPointFast(ptx, pty, ptz);
+            }
+        }
+    }
 
     // Mark all pcs as "modified" (to rebuild the kd-trees, etc.), since we used
     // the "fast" insert methods above:

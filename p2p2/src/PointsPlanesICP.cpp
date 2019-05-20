@@ -261,9 +261,33 @@ void PointsPlanesICP::align_OLAE(
     if (result.nIterations >= p.maxIterations)
         result.terminationReason = IterTermReason::MaxIterations;
 
-    // Ratio of points with a valid pairing:
+        // Ratio of points with a valid pairing:
+#if 0
     if (!layerOfLargestPc.empty())
         result.goodness = mres.at(layerOfLargestPc).correspondencesRatio;
+#else
+    {
+        mrpt::maps::TMatchingParams mp;
+
+        // Matching params for point-to-point:
+        // Distance threshold
+        mp.maxDistForCorrespondence = 0.25f;
+        mp.maxAngularDistForCorrespondence = 0;
+        mp.onlyKeepTheClosest = true;
+        mp.onlyUniqueRobust = false;
+        mp.decimation_other_map_points = 60;
+
+        const auto m1 = pcs1.point_layers.at("raw");
+        const auto m2 = pcs2.point_layers.at("raw");
+
+        mrpt::tfest::TMatchingPairList mpl;
+        mrpt::maps::TMatchingExtraResults res;
+
+        m1->determineMatching3D(m2.get(), result.optimal_tf.mean, mpl, mp, res);
+
+        result.goodness = res.correspondencesRatio;
+    }
+#endif
 
     // Store output:
     result.optimal_tf.mean = solution;
