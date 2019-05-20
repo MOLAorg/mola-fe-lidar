@@ -167,7 +167,7 @@ class LidarOdometry3D : public FrontEndBase
     mola::WorkerThreadsPool worker_pool_{1};
 
     /** Worker thread to align a new KF against past KFs:*/
-    mola::WorkerThreadsPool worker_pool_past_KFs_{3};
+    mola::WorkerThreadsPool worker_pool_past_KFs_{5};
 
     /** All variables that hold the algorithm state */
     struct MethodState
