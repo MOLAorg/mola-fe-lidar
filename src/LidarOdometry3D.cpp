@@ -147,7 +147,14 @@ void LidarOdometry3D::initialize(const std::string& cfg_block)
 {
     MRPT_TRY_START
 
-    // Load:
+    auto numICPThreads = std::thread::hardware_concurrency() / 2;
+    if (numICPThreads < 2) numICPThreads = 2;
+    worker_pool_past_KFs_.resize(numICPThreads);
+    MRPT_LOG_INFO_STREAM(
+        "Number of ICP working threads: " << numICPThreads
+                                          << " (determined automatically)");
+
+    // Load params:
     auto c   = YAML::Load(cfg_block);
     auto cfg = c["params"];
     MRPT_LOG_DEBUG_STREAM("Loading these params:\n" << cfg);
@@ -957,7 +964,7 @@ void LidarOdometry3D::run_one_icp(const ICP_Input& in, ICP_Output& out)
             icp_params.pt2pt_layers.clear();
             icp_params.pt2pt_layers["edges"s]      = 1.0;
             icp_params.pt2pt_layers["planes"s]     = 1.0;
-            icp_params.pt2pt_layers["full_decim"s] = 0.2;
+            icp_params.pt2pt_layers["full_decim"s] = 0.5;
             // icp_params.pt2pt_layers["decim_full"s] = icp_params.pt2pl_layer =
             // "plane_points"s;
 
