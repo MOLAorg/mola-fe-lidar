@@ -14,6 +14,7 @@
 #include <mrpt/core/exceptions.h>
 #include <mrpt/poses/Lie/SE.h>
 #include <mrpt/tfest/se3.h>
+#include <Eigen/Dense>
 
 using namespace p2p2;
 
@@ -115,11 +116,10 @@ void MultiCloudICP::align(
         solution = mrpt::poses::CPose3D(estPoseQuat);
 
         // If matching has not changed, we are done:
-        const auto                        deltaSol = solution - prev_solution;
-        const mrpt::math::CArrayDouble<6> dSol =
-            mrpt::poses::Lie::SE<3>::log(deltaSol);
-        const double delta_xyz = dSol.head<3>().norm();
-        const double delta_rot = dSol.tail<3>().norm();
+        const auto   deltaSol  = solution - prev_solution;
+        const auto   dSol      = mrpt::poses::Lie::SE<3>::log(deltaSol);
+        const double delta_xyz = dSol.blockCopy<3, 1>(0, 0).norm();
+        const double delta_rot = dSol.blockCopy<3, 1>(3, 0).norm();
 
         if (std::abs(delta_xyz) < p.minAbsStep_trans &&
             std::abs(delta_rot) < p.minAbsStep_rot)
@@ -390,11 +390,10 @@ void PointsPlanesICP::align_OLAE(
 #endif
 
         // If matching has not changed, we are done:
-        const auto                        deltaSol = solution - prev_solution;
-        const mrpt::math::CArrayDouble<6> dSol =
-            mrpt::poses::Lie::SE<3>::log(deltaSol);
-        const double delta_xyz = dSol.head<3>().norm();
-        const double delta_rot = dSol.tail<3>().norm();
+        const auto   deltaSol  = solution - prev_solution;
+        const auto   dSol      = mrpt::poses::Lie::SE<3>::log(deltaSol);
+        const double delta_xyz = dSol.blockCopy<3, 1>(0, 0).norm();
+        const double delta_rot = dSol.blockCopy<3, 1>(3, 0).norm();
 
 #if 0
         std::cout << "Dxyz: " << std::abs(delta_xyz)
@@ -742,7 +741,7 @@ void PointsPlanesICP::olae_match(
     Eigen::Vector3d optimal_rot;
 
     // Solve linear system for optimal rotation:
-    const double Md = M.det();
+    const double Md = M.determinant();
 
     // Estimate |Phi|:
     const double estPhi1 = olae_estimate_Phi(Md, nAllMatches);
@@ -867,7 +866,7 @@ void PointsPlanesICP::p2p_match(
                  ).finished();
             // clang-format on
 
-            J.block<3, 6>(idx_pt * 3, 0) = w_pt * J1 * dDexpe_de;
+            J.block<3, 6>(idx_pt * 3, 0) = w_pt * J1 * dDexpe_de.asEigen();
         }
 
         // Point-to-plane:
@@ -898,8 +897,8 @@ void PointsPlanesICP::p2p_match(
                  p.pl_this.plane.coefs[1], p.pl_this.plane.coefs[2])
                     .finished();
 
-            const Eigen::Matrix<double, 1, 6> Jb = Jpl * J1 * dDexpe_de;
-            // std::cout << "jb: " << Jb << "\n";
+            const Eigen::Matrix<double, 1, 6> Jb =
+                Jpl * J1 * dDexpe_de.asEigen();
 
             J.block<1, 6>(idx_pl + nPt2Pt * 3, 0) = w_pl * Jb;
         }
@@ -911,8 +910,8 @@ void PointsPlanesICP::p2p_match(
             -H.colPivHouseholderQr().solve(g);
 
         // 4) add SE(3) increment:
-        const auto dE =
-            mrpt::poses::Lie::SE<3>::exp(mrpt::math::CArrayDouble<6>(delta));
+        const auto dE = mrpt::poses::Lie::SE<3>::exp(
+            mrpt::math::CVectorFixedDouble<6>(delta));
 
         result.optimal_pose = result.optimal_pose + dE;
 
