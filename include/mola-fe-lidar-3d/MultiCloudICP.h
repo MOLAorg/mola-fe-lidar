@@ -12,6 +12,8 @@
 #pragma once
 
 #include <mrpt/maps/CPointsMap.h>
+#include <mrpt/math/TLine3D.h>
+#include <mrpt/math/TPlane.h>
 #include <mrpt/poses/CPose3DPDFGaussian.h>
 #include <cstdint>
 #include <vector>

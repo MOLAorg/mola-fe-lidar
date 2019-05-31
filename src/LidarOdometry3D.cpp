@@ -1204,7 +1204,7 @@ void LidarOdometry3D::filterPointCloud(lidar_scan_t& pcs)
         mean.y *= inv_n;
         mean.z *= inv_n;
 
-        Eigen::Matrix3f mat_a;
+        mrpt::math::CMatrixFixed<double, 3, 3> mat_a;
         mat_a.setZero();
         for (size_t i = 0; i < vxl_pts.indices.size(); i++)
         {
@@ -1220,11 +1220,11 @@ void LidarOdometry3D::filterPointCloud(lidar_scan_t& pcs)
         }
         mat_a *= inv_n;
 
-        // This only looks at the lower-triangular part of the cov
-        // matrix (which is wrong in loam_velodyne!)
-        Eigen::SelfAdjointEigenSolver<Eigen::Matrix3f> esolver(mat_a);
-
-        const Eigen::Vector3f eig_vals = esolver.eigenvalues();
+        // Find eigenvalues & eigenvectors:
+        // This only looks at the lower-triangular part of the cov matrix.
+        mrpt::math::CMatrixFixed<double, 3, 3> eig_vectors;
+        std::vector<double>                    eig_vals;
+        mat_a.eig_symmetric(eig_vectors, eig_vals);
 
         const float e0 = eig_vals[0], e1 = eig_vals[1], e2 = eig_vals[2];
 
@@ -1239,9 +1239,11 @@ void LidarOdometry3D::filterPointCloud(lidar_scan_t& pcs)
             // Filter out horizontal planes, since their uneven density
             // makes ICP fail to converge.
             // A plane on the ground has its 0'th eigenvector like [0 0 1]
-            const Eigen::Vector3f ev0 = esolver.eigenvectors().col(0);
-            // || mean.x > 10.0f || mean.y > 10.0f)
-            if (std::abs(ev0.z()) < 0.9f)
+
+            const auto ev0 =
+                eig_vectors.extractColumn<mrpt::math::TVector3D>(0);
+
+            if (std::abs(ev0.z) < 0.9f)
             {
                 nPlaneVoxels++;
                 dest = pc_planes.get();

@@ -8,7 +8,7 @@
 
 #include <mrpt/containers/CDynamicGrid3D.h>
 #include <mrpt/maps/CPointsMap.h>
-#include <mrpt/math/lightweight_geom_data.h>
+#include <mrpt/math/TPoint3D.h>
 
 class CPointCloudVoxelGrid
 {
