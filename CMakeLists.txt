@@ -19,6 +19,11 @@ find_package(mola-common REQUIRED)
 # find dependencies:
 find_package(MRPT 1.9.9 REQUIRED COMPONENTS slam graphs gui tclap)
 
+# Find the ICP C++ library:
+if (NOT TARGET (mp2_icp))
+find_package(mp2_icp REQUIRED)
+endif()
+
 # -----------------------
 # define lib:
 file(GLOB_RECURSE LIB_SRCS src/*.cpp src/*.h)
@@ -28,9 +33,10 @@ mola_add_library(
 	TARGET ${PROJECT_NAME}
 	SOURCES ${LIB_SRCS} ${LIB_PUBLIC_HDRS}
 	PUBLIC_LINK_LIBRARIES
+		mp2_icp
 		mola-kernel
-	    mrpt::graphs
-	    mrpt::slam
+		mrpt::graphs
+		mrpt::slam
 )
 
 # ----------------------
@@ -39,6 +45,7 @@ mola_add_executable(
 	TARGET  mola-app-fe-lidar-3d-segment-scan
 	SOURCES apps/mola-app-fe-lidar-3d-segment-scan.cpp
 	LINK_LIBRARIES
+		mp2_icp
 		mrpt::tclap
 		mrpt::gui
 		yaml-cpp
@@ -49,6 +56,7 @@ mola_add_executable(
 	TARGET  mola-app-fe-lidar-3d-align
 	SOURCES apps/mola-app-fe-lidar-3d-align.cpp
 	LINK_LIBRARIES
+		mp2_icp
 		mrpt::tclap
 		mrpt::gui
 		yaml-cpp

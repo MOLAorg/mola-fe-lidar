@@ -102,7 +102,7 @@ void LidarOdometry3D::lidar_scan_t::serializeFrom(
 LidarOdometry3D::LidarOdometry3D() = default;
 
 static void load_icp_set_of_params(
-    std::vector<p2p2::Parameters>& out, YAML::Node& cfg,
+    std::vector<mp2_icp::Parameters>& out, YAML::Node& cfg,
     const std::string& prefix)
 {
     using namespace std::string_literals;
@@ -917,7 +917,7 @@ void LidarOdometry3D::run_one_icp(const ICP_Input& in, ICP_Output& out)
 
         size_t largest_pc_count = 1;
 #if 0
-        p2p2::MultiCloudICP::clouds_t pcs_from, pcs_to;
+        mp2_icp::MultiCloudICP::clouds_t pcs_from, pcs_to;
         for (auto& layer : in.from_pc.point_layers)
         {
             pcs_from.push_back(layer.second);
@@ -945,7 +945,7 @@ void LidarOdometry3D::run_one_icp(const ICP_Input& in, ICP_Output& out)
 
         for (unsigned int stage = 0; stage < in.icp_params.size(); stage++)
         {
-            p2p2::Results icp_result;
+            mp2_icp::Results icp_result;
 
             MRPT_LOG_DEBUG_STREAM(
                 "MRPT ICP: max point count=" << largest_pc_count
@@ -956,7 +956,7 @@ void LidarOdometry3D::run_one_icp(const ICP_Input& in, ICP_Output& out)
 
             icp_params.corresponding_points_decimation = decim;
 
-            p2p2::MultiCloudICP::align(
+            mp2_icp::MultiCloudICP::align(
                 pcs_from, pcs_to, current_solution, icp_params, icp_result);
 #else
             auto icp_params = in.icp_params[stage];
@@ -968,7 +968,7 @@ void LidarOdometry3D::run_one_icp(const ICP_Input& in, ICP_Output& out)
             // icp_params.pt2pt_layers["decim_full"s] = icp_params.pt2pl_layer =
             // "plane_points"s;
 
-            p2p2::PointsPlanesICP::align_OLAE(
+            mp2_icp::OLAE_ICP::align_OLAE(
                 pcs_from, pcs_to, current_solution, icp_params, icp_result);
 #endif
 
