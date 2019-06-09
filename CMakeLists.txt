@@ -7,8 +7,14 @@
 # Released under GNU GPL v3. See LICENSE file
 # ------------------------------------------------------------------------------
 
+# Minimum CMake vesion: limited by CMAKE_WINDOWS_EXPORT_ALL_SYMBOLS
+cmake_minimum_required(VERSION 3.4)
+
 # Tell CMake we'll use C++ for use in its tests/flags
 project(mola-fe-lidar-3d LANGUAGES CXX)
+
+# MOLA CMake scripts: "mola_xxx()"
+find_package(mola-common REQUIRED)
 
 # find dependencies:
 find_package(MRPT 1.9.9 REQUIRED COMPONENTS slam graphs gui tclap)
