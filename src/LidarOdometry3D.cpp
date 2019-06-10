@@ -39,70 +39,18 @@ using namespace mola;
 
 static const std::string ANNOTATION_NAME_PC_LAYERS = "lidar-pointcloud-layers";
 
-MRPT_INITIALIZER(do_register)
-{
+MRPT_INITIALIZER(do_register){
     // Register MOLA modules:
     MOLA_REGISTER_MODULE(LidarOdometry3D)
 
     // Register serializable classes:
-    mrpt::rtti::registerClass(CLASS_ID(mola::LidarOdometry3D::lidar_scan_t));
-}
-
-IMPLEMENTS_SERIALIZABLE(lidar_scan_t, CSerializable, mola::LidarOdometry3D)
-
-//
-uint8_t LidarOdometry3D::lidar_scan_t::serializeGetVersion() const { return 0; }
-void    LidarOdometry3D::lidar_scan_t::serializeTo(
-    mrpt::serialization::CArchive& out) const
-{
-    out << pc.lines;
-
-    out.WriteAs<uint32_t>(pc.planes.size());
-    for (const auto& p : pc.planes) out << p.plane << p.centroid;
-
-    out.WriteAs<uint32_t>(pc.lines.size());
-    for (const auto& l : pc.lines) out << l;
-
-    out.WriteAs<uint32_t>(pc.point_layers.size());
-    for (const auto& l : pc.point_layers) out << l.first << *l.second.get();
-}
-void LidarOdometry3D::lidar_scan_t::serializeFrom(
-    mrpt::serialization::CArchive& in, uint8_t version)
-{
-    switch (version)
-    {
-        case 0:
-        {
-            in >> pc.lines;
-            const auto nPls = in.ReadAs<uint32_t>();
-            pc.planes.resize(nPls);
-            for (auto& pl : pc.planes) in >> pl.plane >> pl.centroid;
-
-            const auto nLins = in.ReadAs<uint32_t>();
-            pc.lines.resize(nLins);
-            for (auto& l : pc.lines) in >> l;
-
-            const auto nPts = in.ReadAs<uint32_t>();
-            pc.point_layers.clear();
-            for (std::size_t i = 0; i < nPts; i++)
-            {
-                std::string name;
-                in >> name;
-                pc.point_layers[name] =
-                    mrpt::ptr_cast<mrpt::maps::CPointsMap>::from(
-                        in.ReadObject());
-            }
-        }
-        break;
-        default:
-            MRPT_THROW_UNKNOWN_SERIALIZATION_VERSION(version);
-    };
+    // (None)
 }
 
 LidarOdometry3D::LidarOdometry3D() = default;
 
 static void load_icp_set_of_params(
-    std::vector<mp2_icp::Parameters>& out, YAML::Node& cfg,
+    std::vector<mp2p_icp::Parameters>& out, YAML::Node& cfg,
     const std::string& prefix)
 {
     using namespace std::string_literals;
@@ -917,7 +865,7 @@ void LidarOdometry3D::run_one_icp(const ICP_Input& in, ICP_Output& out)
 
         size_t largest_pc_count = 1;
 #if 0
-        mp2_icp::MultiCloudICP::clouds_t pcs_from, pcs_to;
+        mp2p_icp::MultiCloudICP::clouds_t pcs_from, pcs_to;
         for (auto& layer : in.from_pc.point_layers)
         {
             pcs_from.push_back(layer.second);
@@ -945,20 +893,12 @@ void LidarOdometry3D::run_one_icp(const ICP_Input& in, ICP_Output& out)
 
         for (unsigned int stage = 0; stage < in.icp_params.size(); stage++)
         {
-            mp2_icp::Results icp_result;
+            mp2p_icp::Results icp_result;
 
             MRPT_LOG_DEBUG_STREAM(
                 "MRPT ICP: max point count=" << largest_pc_count
                                              << " decimation=" << decim);
 
-#if 0
-            auto icp_params = in.icp_params[stage];
-
-            icp_params.corresponding_points_decimation = decim;
-
-            mp2_icp::MultiCloudICP::align(
-                pcs_from, pcs_to, current_solution, icp_params, icp_result);
-#else
             auto icp_params = in.icp_params[stage];
 
             icp_params.pt2pt_layers.clear();
@@ -968,9 +908,10 @@ void LidarOdometry3D::run_one_icp(const ICP_Input& in, ICP_Output& out)
             // icp_params.pt2pt_layers["decim_full"s] = icp_params.pt2pl_layer =
             // "plane_points"s;
 
-            mp2_icp::OLAE_ICP::align_OLAE(
+            mp2p_icp::ICP_OLAE icp;
+
+            icp.align(
                 pcs_from, pcs_to, current_solution, icp_params, icp_result);
-#endif
 
             if (icp_result.goodness > 0)
             {
