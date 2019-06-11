@@ -12,6 +12,7 @@
  */
 
 #include <mola-fe-lidar-3d/LidarOdometry3D.h>
+#include <mola-lidar-segmentation/FilterEdgesPlanes.h>
 #include <mrpt/core/exceptions.h>
 #include <mrpt/gui/CDisplayWindow3D.h>
 #include <mrpt/maps/CPointsMapXYZI.h>
@@ -70,12 +71,6 @@ void do_scan_align_test()
     pc2->loadFromKittiVelodyneFile(fil2);
     std::cout << "Done. " << pc2->size() << " points.\n";
 
-    // Filter:
-    mola::LidarOdometry3D module;
-
-    // Not needed outside of a real SLAM system:
-    // module.initialize_common();
-
     // Load params:
     const auto cfg_file = arg_params_file.getValue();
     ASSERT_FILE_EXISTS_(cfg_file);
@@ -91,31 +86,38 @@ void do_scan_align_test()
     }
     std::cout << "Initializing with these params:\n" << str_params << "\n";
 
+    mola::LidarOdometry3D module;
     module.initialize(str_params);
 
-    mola::LidarOdometry3D::lidar_scan_t pcs1;
-    pcs1.pc.point_layers["original"] = pc1;
-    {
-        mrpt::system::CTimeLoggerEntry tle(timlog, "filterPointCloud");
-        module.filterPointCloud(pcs1);
-    }
+    MRPT_TODO("Convert to class factory!");
+    auto filter = mola::lidar_segmentation::FilterEdgesPlanes::Create();
+    filter->initialize(str_params);
 
-    mola::LidarOdometry3D::lidar_scan_t pcs2;
-    pcs2.pc.point_layers["original"] = pc2;
-    {
-        mrpt::system::CTimeLoggerEntry tle(timlog, "filterPointCloud");
-        module.filterPointCloud(pcs2);
-    }
+    // Filter pc #1:
+    auto raw_input1 = mola::lidar_segmentation::input_raw_t(pc1);
+    mp2p_icp::pointcloud_t pcs1;
+
+    mrpt::system::CTimeLoggerEntry tle1(timlog, "filterPointCloud");
+    filter->filter(raw_input1, pcs1);
+    tle1.stop();
+
+    // Filter pc #2:
+    auto raw_input2 = mola::lidar_segmentation::input_raw_t(pc2);
+    mp2p_icp::pointcloud_t pcs2;
+
+    mrpt::system::CTimeLoggerEntry tle2(timlog, "filterPointCloud");
+    filter->filter(raw_input2, pcs2);
+    tle2.stop();
 
     // Send to ICP all layers except "original":
     mola::LidarOdometry3D::ICP_Input icp_in;
 
-    for (const auto& l : pcs1.pc.point_layers)
+    for (const auto& l : pcs1.point_layers)
         if (l.first.compare("original") != 0)
-            icp_in.from_pc.point_layers[l.first] = l.second;
-    for (const auto& l : pcs2.pc.point_layers)
+            icp_in.from_pc->point_layers[l.first] = l.second;
+    for (const auto& l : pcs2.point_layers)
         if (l.first.compare("original") != 0)
-            icp_in.to_pc.point_layers[l.first] = l.second;
+            icp_in.to_pc->point_layers[l.first] = l.second;
 
     // Select ICP configuration parameter set:
     switch (arg_icp_params_set.getValue())
@@ -156,7 +158,7 @@ void do_scan_align_test()
     // Display "layers":
     std::map<std::string, mrpt::gui::CDisplayWindow3D::Ptr> wins;
     int                                                     x = 5, y = 5;
-    for (const auto& layer : pcs1.pc.point_layers)
+    for (const auto& layer : pcs1.point_layers)
     {
         const auto name = layer.first;
 
@@ -177,9 +179,9 @@ void do_scan_align_test()
             scene->insert(gl_pc1);
 
             auto gl_pc2 = mrpt::opengl::CSetOfObjects::Create();
-            pcs2.pc.point_layers.at(layer.first)->renderOptions.color =
+            pcs2.point_layers.at(layer.first)->renderOptions.color =
                 mrpt::img::TColorf(0, 0, 1);
-            pcs2.pc.point_layers.at(layer.first)->getAs3DObject(gl_pc2);
+            pcs2.point_layers.at(layer.first)->getAs3DObject(gl_pc2);
             gl_pc2->setPose(icp_out.found_pose_to_wrt_from.mean);
             scene->insert(gl_pc2);
 

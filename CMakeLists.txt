@@ -19,10 +19,8 @@ find_package(mola-common REQUIRED)
 # find dependencies:
 find_package(MRPT 1.9.9 REQUIRED COMPONENTS slam graphs gui tclap)
 
-# Find the ICP C++ library:
-if (NOT TARGET mp2p_icp)
-find_package(mp2p_icp REQUIRED)
-endif()
+find_mola_package(mola-lidar-segmentation)
+find_mola_package(mp2p_icp)
 
 # -----------------------
 # define lib:
@@ -33,6 +31,7 @@ mola_add_library(
 	TARGET ${PROJECT_NAME}
 	SOURCES ${LIB_SRCS} ${LIB_PUBLIC_HDRS}
 	PUBLIC_LINK_LIBRARIES
+	mola-lidar-segmentation
 	mp2p_icp
 		mola-kernel
 		mrpt::graphs
@@ -42,20 +41,10 @@ mola_add_library(
 # ----------------------
 # define app targets:
 mola_add_executable(
-	TARGET  mola-app-fe-lidar-3d-segment-scan
-	SOURCES apps/mola-app-fe-lidar-3d-segment-scan.cpp
-	LINK_LIBRARIES
-	mp2p_icp
-		mrpt::tclap
-		mrpt::gui
-		yaml-cpp
-		${PROJECT_NAME}
-)
-
-mola_add_executable(
 	TARGET  mola-app-fe-lidar-3d-align
 	SOURCES apps/mola-app-fe-lidar-3d-align.cpp
 	LINK_LIBRARIES
+	mola-lidar-segmentation
 	mp2p_icp
 		mrpt::tclap
 		mrpt::gui

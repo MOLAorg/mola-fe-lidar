@@ -13,8 +13,8 @@
 
 #include <mola-kernel/FrontEndBase.h>
 #include <mola-kernel/WorkerThreadsPool.h>
+#include <mola-lidar-segmentation/FilterBase.h>
 #include <mp2p_icp/ICP_OLAE.h>
-#include <mp2p_icp/PointCloudToVoxelGrid.h>
 #include <mrpt/graphs/CNetworkOfPoses.h>
 #include <mrpt/maps/CPointsMap.h>
 #include <mrpt/slam/CICP.h>
@@ -83,9 +83,10 @@ class LidarOdometry3D : public FrontEndBase
 
         unsigned int max_KFs_local_graph{50000};
 
-        /** ICP parameters for the case of having, or not, a good velocity model
-         * that works a good prior. Each entry in the vector is an "ICP stage",
-         * to be run as a sequence of coarser to finer detail */
+        /** ICP parameters for the case of having, or not, a good velocity
+         * model that works a good prior. Each entry in the vector is an
+         * "ICP stage", to be run as a sequence of coarser to finer detail
+         */
         std::vector<mp2p_icp::Parameters> icp_params_with_vel,
             icp_params_without_vel, icp_params_loopclosure;
 
@@ -103,22 +104,6 @@ class LidarOdometry3D : public FrontEndBase
 
     using topological_dist_t = std::size_t;
 
-    /** Different "layers" in which a point cloud is decomposed.
-     * For example: "edges", "planes", etc.
-     */
-    struct lidar_scan_t : public mrpt::serialization::CSerializable
-    {
-        DEFINE_SERIALIZABLE(lidar_scan_t)
-       public:
-        mp2p_icp::pointcloud_t pc;
-
-        inline bool hasLayer(const std::string& s) const
-        {
-            return pc.point_layers.find(s) != pc.point_layers.end();
-        }
-    };
-    void filterPointCloud(lidar_scan_t& pcs);
-
     enum class AlignKind : uint8_t
     {
         LidarOdometry,
@@ -130,11 +115,11 @@ class LidarOdometry3D : public FrontEndBase
     {
         using Ptr = std::shared_ptr<ICP_Input>;
 
-        AlignKind              align_kind{AlignKind::LidarOdometry};
-        id_t                   to_id{mola::INVALID_ID};
-        id_t                   from_id{mola::INVALID_ID};
-        mp2p_icp::pointcloud_t to_pc, from_pc;
-        mrpt::math::TPose3D    init_guess_to_wrt_from;
+        AlignKind                   align_kind{AlignKind::LidarOdometry};
+        id_t                        to_id{mola::INVALID_ID};
+        id_t                        from_id{mola::INVALID_ID};
+        mp2p_icp::pointcloud_t::Ptr to_pc, from_pc;
+        mrpt::math::TPose3D         init_guess_to_wrt_from;
 
         std::vector<mp2p_icp::Parameters> icp_params;
 
@@ -158,13 +143,13 @@ class LidarOdometry3D : public FrontEndBase
     /** All variables that hold the algorithm state */
     struct MethodState
     {
-        mrpt::Clock::time_point         last_obs_tim{};
-        lidar_scan_t::Ptr               last_points{};
-        mrpt::math::TTwist3D            last_iter_twist;
-        bool                            last_iter_twist_is_good{false};
-        id_t                            last_kf{mola::INVALID_ID};
-        mrpt::poses::CPose3D            accum_since_last_kf{};
-        mp2p_icp::PointCloudToVoxelGrid filter_grid;
+        mrpt::Clock::time_point             last_obs_tim{};
+        mp2p_icp::pointcloud_t::Ptr         last_points{};
+        mrpt::math::TTwist3D                last_iter_twist;
+        bool                                last_iter_twist_is_good{false};
+        id_t                                last_kf{mola::INVALID_ID};
+        mrpt::poses::CPose3D                accum_since_last_kf{};
+        lidar_segmentation::FilterBase::Ptr pc_filter;
 
         // An auxiliary (local) pose-graph to use Dijkstra and find guesses
         // for ICP against nearby past KFs:
