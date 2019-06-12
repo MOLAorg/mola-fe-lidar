@@ -384,6 +384,7 @@ void LidarOdometry3D::doProcessNewObservation(CObservation::Ptr& o)
 
             // Add point cloud to the KF annotations in the map:
             // Also, add Rendering decorations for the map visualizer:
+            ASSERT_(worldmodel_);
             {
                 profiler_.enter("doProcessNewObservation.wait.ent.writelock");
                 worldmodel_->entities_lock_for_write();
