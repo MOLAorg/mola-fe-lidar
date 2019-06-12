@@ -16,6 +16,7 @@
 #include <mrpt/core/exceptions.h>
 #include <mrpt/gui/CDisplayWindow3D.h>
 #include <mrpt/maps/CPointsMapXYZI.h>
+#include <mrpt/obs/CObservationPointCloud.h>
 #include <mrpt/opengl/COpenGLScene.h>
 #include <mrpt/opengl/stock_objects.h>
 #include <mrpt/otherlibs/tclap/CmdLine.h>
@@ -94,7 +95,8 @@ void do_scan_align_test()
     filter->initialize(str_params);
 
     // Filter pc #1:
-    auto raw_input1 = mola::lidar_segmentation::input_raw_t(pc1);
+    auto raw_input1        = mrpt::obs::CObservationPointCloud::Create();
+    raw_input1->pointcloud = pc1;
     mp2p_icp::pointcloud_t pcs1;
 
     mrpt::system::CTimeLoggerEntry tle1(timlog, "filterPointCloud");
@@ -102,7 +104,8 @@ void do_scan_align_test()
     tle1.stop();
 
     // Filter pc #2:
-    auto raw_input2 = mola::lidar_segmentation::input_raw_t(pc2);
+    auto raw_input2        = mrpt::obs::CObservationPointCloud::Create();
+    raw_input2->pointcloud = pc2;
     mp2p_icp::pointcloud_t pcs2;
 
     mrpt::system::CTimeLoggerEntry tle2(timlog, "filterPointCloud");

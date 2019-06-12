@@ -156,7 +156,7 @@ void LidarOdometry3D::initialize(const std::string& cfg_block)
         ASSERT_(state_.pc_filter);
 
         // Initialize with YAML-based parameters:
-        state_.pc_filter->initialize(pc_params.as<std::string>());
+        state_.pc_filter->initialize(mola::yaml2string(pc_params));
     }
 
     // attach to world model, if present:
@@ -237,8 +237,7 @@ void LidarOdometry3D::doProcessNewObservation(CObservation::Ptr& o)
             profiler_, "doProcessNewObservation.1.filter_pointclouds");
 
         // convert to variant:
-        auto in_raw = lidar_segmentation::input_raw_t(o);
-        state_.pc_filter->filter(in_raw, *this_obs_points);
+        state_.pc_filter->filter(o, *this_obs_points);
 
         tle1.stop();
 
