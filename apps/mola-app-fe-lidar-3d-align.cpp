@@ -5,13 +5,13 @@
  * ------------------------------------------------------------------------- */
 
 /**
- * @file   test-mola-fe-lidar-3d-align.cpp
+ * @file   test-mola-fe-lidar-align.cpp
  * @brief  test for 3D lidar scan alignment
  * @author Jose Luis Blanco Claraco
  * @date   Jan 24, 2019
  */
 
-#include <mola-fe-lidar-3d/LidarOdometry3D.h>
+#include <mola-fe-lidar/LidarOdometry3D.h>
 #include <mola-lidar-segmentation/FilterEdgesPlanes.h>
 #include <mrpt/core/exceptions.h>
 #include <mrpt/gui/CDisplayWindow3D.h>
@@ -26,7 +26,7 @@
 #include <iostream>
 
 // Declare supported cli switches ===========
-static TCLAP::CmdLine cmd("test-mola-fe-lidar-3d-align");
+static TCLAP::CmdLine cmd("test-mola-fe-lidar-align");
 
 static TCLAP::ValueArg<std::string> arg_kitti_file1(
     "", "k1", "Scan1: Load 3D scan from a Kitti lidar (.bin) file", true, "",

@@ -10,13 +10,13 @@
  * @date   Dec 17, 2018
  */
 
-/** \defgroup mola_fe_lidar_icp_grp mola-fe-lidar-3d.
+/** \defgroup mola_fe_lidar_icp_grp mola-fe-lidar.
  * Simple SLAM FrontEnd for point-cloud sensors via ICP registration.
  *
  *
  */
 
-#include <mola-fe-lidar-3d/LidarOdometry3D.h>
+#include <mola-fe-lidar/LidarOdometry3D.h>
 #include <mola-kernel/yaml_helpers.h>
 #include <mrpt/config/CConfigFileMemory.h>
 #include <mrpt/core/initializer.h>

@@ -1,10 +1,14 @@
-# mola-fe-lidar-3d
-MOLA module: Front-end for point-cloud sensors based on ICP
-
+# mola-fe-lidar
+MOLA module: Front-end for point-cloud sensors.
 
 Provided MOLA modules:
 * `LidarOdometry3D`: type `FrontEnd`.
 
-
 ## Build and install
-Refer to instructions in the root MOLA repo.
+Refer to the [root MOLA repository](https://github.com/MOLAorg/mola).
+
+## Docs and examples
+See this package page [in the documentation](https://docs.mola-slam.org/latest/modules.html).
+
+## License
+This package is released under the GNU GPL v3 license.
