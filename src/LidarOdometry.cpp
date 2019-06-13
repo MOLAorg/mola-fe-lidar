@@ -41,7 +41,7 @@ using namespace mola;
 
 static const std::string ANNOTATION_NAME_PC_LAYERS = "lidar-pointcloud-layers";
 
-MRPT_INITIALIZER(do_register){
+MRPT_INITIALIZER(do_register_LidarOdometry){
     // Register MOLA modules:
     MOLA_REGISTER_MODULE(LidarOdometry)
 
