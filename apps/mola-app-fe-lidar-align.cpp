@@ -11,7 +11,7 @@
  * @date   Jan 24, 2019
  */
 
-#include <mola-fe-lidar/LidarOdometry3D.h>
+#include <mola-fe-lidar/LidarOdometry.h>
 #include <mola-lidar-segmentation/FilterEdgesPlanes.h>
 #include <mrpt/core/exceptions.h>
 #include <mrpt/gui/CDisplayWindow3D.h>
@@ -87,7 +87,7 @@ void do_scan_align_test()
     }
     std::cout << "Initializing with these params:\n" << str_params << "\n";
 
-    mola::LidarOdometry3D module;
+    mola::LidarOdometry module;
     module.initialize(str_params);
 
     MRPT_TODO("Convert to class factory!");
@@ -113,7 +113,7 @@ void do_scan_align_test()
     tle2.stop();
 
     // Send to ICP all layers except "original":
-    mola::LidarOdometry3D::ICP_Input icp_in;
+    mola::LidarOdometry::ICP_Input icp_in;
 
     for (const auto& l : pcs1.point_layers)
         if (l.first.compare("original") != 0)
@@ -127,15 +127,15 @@ void do_scan_align_test()
     {
         case 0:
             icp_in.icp_params = module.params_.icp_params_with_vel;
-            icp_in.align_kind = mola::LidarOdometry3D::AlignKind::LidarOdometry;
+            icp_in.align_kind = mola::LidarOdometry::AlignKind::LidarOdometry;
             break;
         case 1:
             icp_in.icp_params = module.params_.icp_params_without_vel;
-            icp_in.align_kind = mola::LidarOdometry3D::AlignKind::NearbyAlign;
+            icp_in.align_kind = mola::LidarOdometry::AlignKind::NearbyAlign;
             break;
         case 2:
             icp_in.icp_params = module.params_.icp_params_loopclosure;
-            icp_in.align_kind = mola::LidarOdometry3D::AlignKind::LoopClosure;
+            icp_in.align_kind = mola::LidarOdometry::AlignKind::LoopClosure;
             break;
         default:
             throw std::invalid_argument("icp-params-set: invalid value.");
@@ -144,7 +144,7 @@ void do_scan_align_test()
     // Set initial guess:
     icp_in.init_guess_to_wrt_from.fromString(arg_init_pose.getValue());
 
-    mola::LidarOdometry3D::ICP_Output icp_out;
+    mola::LidarOdometry::ICP_Output icp_out;
     module.setVerbosityLevel(mrpt::system::LVL_DEBUG);
     {
         mrpt::system::CTimeLoggerEntry tle(timlog, "run_one_icp");

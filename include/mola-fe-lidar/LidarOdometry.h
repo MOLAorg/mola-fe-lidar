@@ -4,7 +4,7 @@
  * See LICENSE for license information.
  * ------------------------------------------------------------------------- */
 /**
- * @file   LidarOdometry3D.h
+ * @file   LidarOdometry.h
  * @brief  Simple SLAM FrontEnd for point-cloud sensors via ICP registration
  * @author Jose Luis Blanco Claraco
  * @date   Dec 17, 2018
@@ -25,11 +25,11 @@ namespace mola
 /** A front-end for Lidar/point-cloud odometry & SLAM.
  *
  * \ingroup mola_fe_lidar_icp_grp */
-class LidarOdometry3D : public FrontEndBase
+class LidarOdometry : public FrontEndBase
 {
    public:
-    LidarOdometry3D();
-    virtual ~LidarOdometry3D() override = default;
+    LidarOdometry();
+    virtual ~LidarOdometry() override = default;
 
     // See docs in base class
     void initialize(const std::string& cfg_block) override;

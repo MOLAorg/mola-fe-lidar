@@ -41,8 +41,8 @@ mola_add_library(
 # ----------------------
 # define app targets:
 mola_add_executable(
-	TARGET  mola-app-fe-lidar-3d-align
-	SOURCES apps/mola-app-fe-lidar-3d-align.cpp
+	TARGET  mola-app-fe-lidar-align
+	SOURCES apps/mola-app-fe-lidar-align.cpp
 	LINK_LIBRARIES
 	mola-lidar-segmentation
 	mp2p_icp
