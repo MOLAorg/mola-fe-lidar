@@ -27,6 +27,7 @@
 #include <mrpt/opengl/CText.h>
 #include <mrpt/opengl/stock_objects.h>
 #include <mrpt/poses/CPose3DPDFGaussian.h>
+#include <mrpt/poses/Lie/SE.h>
 #include <mrpt/random.h>
 #include <mrpt/serialization/CArchive.h>
 #include <mrpt/system/datetime.h>
@@ -336,8 +337,10 @@ void LidarOdometry::doProcessNewObservation(CObservation::Ptr& o)
             state_.accum_since_last_kf = state_.accum_since_last_kf + rel_pose;
             const double dist_eucl_since_last =
                 state_.accum_since_last_kf.norm();
-            const double rot_since_last = 0;
-            MRPT_TODO("Add rotation threshold");
+            const double rot_since_last =
+                mrpt::poses::Lie::SE<3>::log(state_.accum_since_last_kf)
+                    .blockCopy<3, 1>(3, 0)
+                    .norm();
 
             MRPT_LOG_DEBUG_FMT(
                 "Since last KF: dist=%5.03f m rotation=%.01f deg",
@@ -462,7 +465,7 @@ void LidarOdometry::doProcessNewObservation(CObservation::Ptr& o)
                 }
 
                 MRPT_LOG_DEBUG_STREAM(
-                    "New FactorRelativePose3ConstVel: #"
+                    "New FactorRelativePose3: #"
                     << state_.last_kf << " <=> #" << new_kf_id
                     << ". rel_pose=" << state_.accum_since_last_kf.asString());
             }
