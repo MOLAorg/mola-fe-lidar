@@ -133,13 +133,6 @@ class LidarOdometry : public FrontEndBase
     };
     void run_one_icp(const ICP_Input& in, ICP_Output& out);
 
-   private:
-    /** The worker thread pool with 1 thread for processing incomming scans */
-    mola::WorkerThreadsPool worker_pool_{1};
-
-    /** Worker thread to align a new KF against past KFs:*/
-    mola::WorkerThreadsPool worker_pool_past_KFs_{1};
-
     /** All variables that hold the algorithm state */
     struct MethodState
     {
@@ -164,6 +157,16 @@ class LidarOdometry : public FrontEndBase
 
         int kf_decor_decim_cnt{-1};
     };
+
+    const MethodState& state() const { return state_; }
+    MethodState        stateCopy() const { return state_; }
+
+   private:
+    /** The worker thread pool with 1 thread for processing incomming scans */
+    mola::WorkerThreadsPool worker_pool_{1};
+
+    /** Worker thread to align a new KF against past KFs:*/
+    mola::WorkerThreadsPool worker_pool_past_KFs_{1};
 
     MethodState     state_;
     WorldModel::Ptr worldmodel_;

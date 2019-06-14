@@ -155,6 +155,8 @@ void LidarOdometry::initialize(const std::string& cfg_block)
             mola::lidar_segmentation::FilterEdgesPlanes::Create();
 
         ASSERT_(state_.pc_filter);
+        // Same verbosity level:
+        state_.pc_filter->setMinLoggingLevel(this->getMinLoggingLevel());
 
         // Initialize with YAML-based parameters:
         state_.pc_filter->initialize(mola::yaml2string(pc_params));
@@ -875,6 +877,7 @@ void LidarOdometry::run_one_icp(const ICP_Input& in, ICP_Output& out)
         if (params_.decimate_to_point_count > 0)
             decim = static_cast<unsigned>(
                 largest_pc_count / params_.decimate_to_point_count);
+        if (decim < 1) decim = 1;
 
         mrpt::math::TPose3D current_solution = in.init_guess_to_wrt_from;
 
@@ -889,11 +892,9 @@ void LidarOdometry::run_one_icp(const ICP_Input& in, ICP_Output& out)
             auto icp_params = in.icp_params[stage];
 
             icp_params.pt2pt_layers.clear();
-            icp_params.pt2pt_layers["edges"s]      = 1.0;
-            icp_params.pt2pt_layers["planes"s]     = 1.0;
-            icp_params.pt2pt_layers["full_decim"s] = 0.5;
-            // icp_params.pt2pt_layers["decim_full"s] = icp_params.pt2pl_layer =
-            // "plane_points"s;
+            icp_params.pt2pt_layers["edge_points"s]  = 1.0;
+            icp_params.pt2pt_layers["plane_points"s] = 1.0;
+            icp_params.pt2pt_layers["full_decim"s]   = 0.5;
 
             mp2p_icp::ICP_OLAE icp;
 
