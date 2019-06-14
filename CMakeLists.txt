@@ -19,8 +19,9 @@ find_package(mola-common REQUIRED)
 # find dependencies:
 find_package(MRPT 1.9.9 REQUIRED COMPONENTS slam graphs gui tclap)
 
-find_mola_package(mola-lidar-segmentation)
-find_mola_package(mp2p_icp)
+find_mola_package(mola-kernel REQUIRED)
+find_mola_package(mola-lidar-segmentation REQUIRED)
+find_mola_package(mp2p_icp REQUIRED)
 
 # -----------------------
 # define lib:

@@ -1,1 +1,2 @@
+build-dep: mola-kernel
 build-dep: mola-lidar-segmentation
