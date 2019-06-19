@@ -891,10 +891,10 @@ void LidarOdometry::run_one_icp(const ICP_Input& in, ICP_Output& out)
 
             auto icp_params = in.icp_params[stage];
 
-            icp_params.pt2pt_layers.clear();
-            icp_params.pt2pt_layers["edge_points"s]  = 1.0;
-            icp_params.pt2pt_layers["plane_points"s] = 1.0;
-            icp_params.pt2pt_layers["full_decim"s]   = 0.5;
+            icp_params.weight_pt2pt_layers.clear();
+            icp_params.weight_pt2pt_layers["edge_points"s]  = 1.0;
+            icp_params.weight_pt2pt_layers["plane_points"s] = 1.0;
+            icp_params.weight_pt2pt_layers["full_decim"s]   = 0.5;
 
             mp2p_icp::ICP_OLAE icp;
 
