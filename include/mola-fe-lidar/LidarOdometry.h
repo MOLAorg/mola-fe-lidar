@@ -27,6 +27,8 @@ namespace mola
  * \ingroup mola_fe_lidar_icp_grp */
 class LidarOdometry : public FrontEndBase
 {
+    DEFINE_MRPT_OBJECT(LidarOdometry)
+
    public:
     LidarOdometry();
     virtual ~LidarOdometry() override = default;
