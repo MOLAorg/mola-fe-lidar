@@ -14,10 +14,9 @@
 #include <mola-kernel/WorkerThreadsPool.h>
 #include <mola-kernel/interfaces/FrontEndBase.h>
 #include <mola-lidar-segmentation/LidarFilterBase.h>
-#include <mp2p_icp/ICP_OLAE.h>
+#include <mp2p_icp/ICP_Base.h>
 #include <mrpt/graphs/CNetworkOfPoses.h>
 #include <mrpt/maps/CPointsMap.h>
-#include <mrpt/slam/CICP.h>
 #include <mutex>
 
 namespace mola
@@ -84,6 +83,8 @@ class LidarOdometry : public FrontEndBase
         unsigned int min_topo_dist_to_consider_loopclosure{20};
 
         unsigned int max_KFs_local_graph{50000};
+
+        std::string icp_class{"undefined"};
 
         /** ICP parameters for the case of having, or not, a good velocity
          * model that works a good prior. Each entry in the vector is an

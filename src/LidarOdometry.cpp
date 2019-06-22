@@ -148,7 +148,6 @@ void LidarOdometry::initialize(const std::string& cfg_block)
     {
         ProfilerEntry tle(profiler_, "filterPointCloud_initialize");
 
-        MRPT_TODO("Remove: replace by factory from Yaml parameters");
         std::string pointcloud_filter_class;
         YAML_LOAD_REQ(pointcloud_filter_class, std::string);
 
@@ -156,15 +155,43 @@ void LidarOdometry::initialize(const std::string& cfg_block)
         auto pc_params = cfg["pointcloud_filter_params"];
 
         // Class factory:
+        auto ptrNew = mrpt::rtti::classFactory(pointcloud_filter_class);
         state_.pc_filter =
-            mola::lidar_segmentation::FilterEdgesPlanes::Create();
+            mrpt::ptr_cast<lidar_segmentation::LidarFilterBase>::from(ptrNew);
 
-        ASSERT_(state_.pc_filter);
+        if (!state_.pc_filter)
+            THROW_EXCEPTION_FMT(
+                "pointcloud_filter_class=`%s` is a non-registered or "
+                "incompatible class. Please, run: "
+                "`mola-cli --rtti-children-of "
+                "mola::lidar_segmentation::LidarFilterBase`"
+                "to see the list of known classes.",
+                pointcloud_filter_class.c_str());
+
         // Same verbosity level:
         state_.pc_filter->setMinLoggingLevel(this->getMinLoggingLevel());
 
         // Initialize with YAML-based parameters:
         state_.pc_filter->initialize(mola::yaml2string(pc_params));
+    }
+
+    // Create ICP algorithm:
+    {
+        YAML_LOAD_REQ(params_, icp_class, std::string);
+
+        // Test that the class factory works. We will generate a new object
+        // for each ICP job later on.
+        auto ptrNew = mrpt::rtti::classFactory(params_.icp_class);
+        mp2p_icp::ICP_Base::Ptr obj =
+            mrpt::ptr_cast<mp2p_icp::ICP_Base>::from(ptrNew);
+
+        if (!state_.pc_filter)
+            THROW_EXCEPTION_FMT(
+                "icp_class=`%s` is a non-registered or "
+                "incompatible class. Please, run: "
+                "`mola-cli --rtti-children-of mp2p_icp::ICP_Base` to see the "
+                "list of known classes.",
+                params_.icp_class.c_str());
     }
 
     // attach to world model, if present:
@@ -916,9 +943,11 @@ void LidarOdometry::run_one_icp(const ICP_Input& in, ICP_Output& out)
             icp_params.weight_pt2pt_layers["plane_points"s] = 1.0;
             icp_params.weight_pt2pt_layers["full_decim"s]   = 0.5;
 
-            mp2p_icp::ICP_OLAE icp;
+            auto ptrNew = mrpt::rtti::classFactory(params_.icp_class);
+            auto icp    = mrpt::ptr_cast<mp2p_icp::ICP_Base>::from(ptrNew);
+            ASSERT_(icp);
 
-            icp.align(
+            icp->align(
                 pcs_from, pcs_to, current_solution, icp_params, icp_result);
 
             if (icp_result.goodness > 0)
