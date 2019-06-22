@@ -20,6 +20,7 @@
 #include <mola-kernel/yaml_helpers.h>
 #include <mrpt/config/CConfigFileMemory.h>
 #include <mrpt/core/initializer.h>
+#include <mrpt/maps/CColouredPointsMap.h>
 #include <mrpt/obs/CObservationComment.h>
 #include <mrpt/obs/CObservationPointCloud.h>
 #include <mrpt/obs/CRawlog.h>
@@ -411,25 +412,40 @@ void LidarOdometry::doProcessNewObservation(CObservation::Ptr& o)
 
                 MRPT_TODO(
                     "move this render stuff to its a low-prio worker thread?");
-                if (auto obs_pc =
-                        dynamic_cast<const mrpt::obs::CObservationPointCloud*>(
-                            o.get());
-                    obs_pc != nullptr && obs_pc->pointcloud &&
-                    (state_.kf_decor_decim_cnt < 0 ||
-                     ++state_.kf_decor_decim_cnt >
-                         params_.viz_decor_decimation))
+                if (state_.kf_decor_decim_cnt < 0 ||
+                    ++state_.kf_decor_decim_cnt > params_.viz_decor_decimation)
                 {
-                    state_.kf_decor_decim_cnt = 0;
-
                     auto obs_render = mrpt::opengl::CSetOfObjects::Create();
-                    obs_pc->pointcloud->renderOptions.point_size =
-                        params_.viz_decor_pointsize;
-                    obs_pc->pointcloud->getAs3DObject(obs_render);
 
-                    worldmodel_->entity_annotations_by_id(new_kf_id).emplace(
-                        std::piecewise_construct,
-                        std::forward_as_tuple("render_decoration"),
-                        std::forward_as_tuple(obs_render, "render_decoration"));
+                    if (auto obs_pc = dynamic_cast<
+                            const mrpt::obs::CObservationPointCloud*>(o.get());
+                        obs_pc != nullptr && obs_pc->pointcloud)
+                    {
+                        state_.kf_decor_decim_cnt = 0;
+
+                        obs_pc->pointcloud->renderOptions.point_size =
+                            params_.viz_decor_pointsize;
+                        obs_pc->pointcloud->getAs3DObject(obs_render);
+                    }
+                    else
+                    {
+                        state_.kf_decor_decim_cnt = 0;
+
+                        mrpt::maps::CColouredPointsMap pm;
+                        pm.renderOptions.point_size =
+                            params_.viz_decor_pointsize;
+
+                        if (pm.insertObservationPtr(o))
+                            pm.getAs3DObject(obs_render);
+                    }
+
+                    if (obs_render)
+                        worldmodel_->entity_annotations_by_id(new_kf_id)
+                            .emplace(
+                                std::piecewise_construct,
+                                std::forward_as_tuple("render_decoration"),
+                                std::forward_as_tuple(
+                                    obs_render, "render_decoration"));
                 }
 
                 worldmodel_->entities_unlock_for_write();
