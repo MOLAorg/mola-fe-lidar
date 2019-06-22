@@ -4,6 +4,8 @@ MOLA module: Front-end for point-cloud sensors.
 Provided MOLA modules:
 * `LidarOdometry`: type `FrontEnd`.
 
+![LiDAR front-end arquitecture overview](docs/mola-fe-lidar-arquitecture.png)
+
 ## Build and install
 Refer to the [root MOLA repository](https://github.com/MOLAorg/mola).
 
