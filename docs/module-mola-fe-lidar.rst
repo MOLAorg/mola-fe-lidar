@@ -6,8 +6,7 @@
 Module: mola-fe-lidar
 ======================
 
-Write me!
+This module provides a flexible architecture for SLAM front-ends tailored to
+lidar/point-cloud sensors.
 
-
-.. image:: mola-fe-lidar-arquitecture.png
-
+.. image:: ../../modules/mola-fe-lidar/docs/mola-fe-lidar-arquitecture.png
