@@ -1,3 +1,5 @@
+.. _mola-fe-lidar:
+
 .. index::
    single: mola-fe-lidar
    module: mola-fe-lidar
