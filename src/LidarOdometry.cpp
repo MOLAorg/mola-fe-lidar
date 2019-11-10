@@ -44,7 +44,7 @@ using namespace mola;
 static const std::string ANNOTATION_NAME_PC_LAYERS = "lidar-pointcloud-layers";
 
 // arguments: class_name, parent_class, class namespace
-IMPLEMENTS_MRPT_OBJECT_NS_PREFIX(LidarOdometry, FrontEndBase, mola);
+IMPLEMENTS_MRPT_OBJECT(LidarOdometry, FrontEndBase, mola)
 
 MRPT_INITIALIZER(do_register_LidarOdometry)
 {

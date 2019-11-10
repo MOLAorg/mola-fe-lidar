@@ -26,7 +26,7 @@ namespace mola
  * \ingroup mola_fe_lidar_icp_grp */
 class LidarOdometry : public FrontEndBase
 {
-    DEFINE_MRPT_OBJECT(LidarOdometry)
+    DEFINE_MRPT_OBJECT(LidarOdometry, mola)
 
    public:
     LidarOdometry();
