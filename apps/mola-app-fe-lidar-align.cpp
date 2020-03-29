@@ -14,13 +14,13 @@
 #include <mola-fe-lidar/LidarOdometry.h>
 #include <mola-kernel/yaml_helpers.h>
 #include <mola-lidar-segmentation/FilterEdgesPlanes.h>
+#include <mrpt/3rdparty/tclap/CmdLine.h>
 #include <mrpt/core/exceptions.h>
 #include <mrpt/gui/CDisplayWindow3D.h>
 #include <mrpt/maps/CPointsMapXYZI.h>
 #include <mrpt/obs/CObservationPointCloud.h>
 #include <mrpt/opengl/COpenGLScene.h>
 #include <mrpt/opengl/stock_objects.h>
-#include <mrpt/3rdparty/tclap/CmdLine.h>
 #include <mrpt/system/CTimeLogger.h>
 #include <mrpt/system/filesystem.h>
 #include <yaml-cpp/yaml.h>
@@ -232,8 +232,7 @@ void do_scan_align_test()
             auto msg = mrpt::format(
                 "layer=`%s`  => %u points.", name.c_str(),
                 static_cast<unsigned int>(layer.second->size()));
-            win->addTextMessage(
-                5, 5, msg, mrpt::img::TColorf(1, 1, 1), "sans", 10.0);
+            win->addTextMessage(5, 5, msg);
 
             win->setPos(x, y);
             y += 350;
@@ -296,8 +295,7 @@ void do_scan_align_test()
         auto msg = mrpt::format(
             "layer=`%s`  => %u elements.", name.c_str(),
             static_cast<unsigned int>(pcs1->planes.size()));
-        win->addTextMessage(
-            5, 5, msg, mrpt::img::TColorf(1, 1, 1), "sans", 10.0);
+        win->addTextMessage(5, 5, msg);
 
         win->setPos(x, y);
         y += 350;
