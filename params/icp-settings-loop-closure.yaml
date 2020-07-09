@@ -1,0 +1,38 @@
+# File to be $include{}'d into the param block of other high-level SLAM files.
+
+# Instantiate one of the ICP algorithms.
+# See available methods with:
+#  mola-cli --rtti-children-of mp2p_icp::ICP_Base
+#
+icp_class: mp2p_icp::ICP_Horn_MultiCloud
+
+# See: mp2p_icp::Parameter
+params:
+  maxIterations: 50
+  maxPairsPerLayer: 500
+  minAbsStep_trans: 1e-5
+  minAbsStep_rot: 1e-5
+  pairingsWeightParameters:
+    # scale-based outlier detector
+    use_scale_outlier_detector: true
+    scale_outlier_threshold: 1.1
+    # An optional "a priori" term.
+    use_robust_kernel: false
+    robust_kernel_param: 0.1 # [degrees]
+    robust_kernel_scale: 400.0
+
+# Sequence of one or more pairs (class, params) defining mp2p_icp::Matcher instances
+# to pair geometric entities between pointclouds.
+# See available methods with:
+#  mola-cli --rtti-children-of mp2p_icp::Matcher
+matchers:
+  - class: mp2p_icp::Matcher_Points_DistanceThreshold
+    params:
+      threshold: 10.0
+
+# See available methods with:
+#  mola-cli --rtti-children-of mp2p_icp::QualityEvaluator
+quality:
+  class: mp2p_icp::QualityEvaluator_PairedRatio
+  params:
+    # (none)

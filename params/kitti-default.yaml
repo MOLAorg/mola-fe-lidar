@@ -38,31 +38,21 @@ max_dist_to_loop_closure: 30.0  # [m]
 max_nearby_align_checks: 5
 min_topo_dist_to_consider_loopclosure: 30
 # ---------------------------------------------------------
-# Instantiate one of the ICP algorithms.
-# See available methods with:
-#  mola-cli --rtti-children-of mp2p_icp::ICP_Base
-#
-icp_class: mp2p_icp::ICP_Horn_MultiCloud
-#icp_class: mp2p_icp::ICP_OLAE
-#
-# And its params:
 # Params for the ICP algoritm:
 # Case: WITH a good twist (velocity) model:
-icp_params_with_vel.maxIterations:  10    90
-icp_params_with_vel.thresholdDist:   1.0   0.50   # [meters]
-icp_params_with_vel.thresholdAng:    2.0   0.01   # [deg]
+icp_settings_with_vel: $include{$(mola-dir mola-fe-lidar)/params/icp-settings-regular.yaml}
+
 # Case: WITHOUT a good twist (velocity) model:
-icp_params_without_vel.maxIterations:   5     100
-icp_params_without_vel.thresholdDist:   3.0   0.50  # [meters]
-icp_params_without_vel.thresholdAng:    2.0   0.01  # [deg]
+icp_settings_without_vel: $include{$(mola-dir mola-fe-lidar)/params/icp-settings-regular.yaml}
+
 # Case: Loop closure
 loop_closure_montecarlo_samples: 10
-icp_params_loopclosure.maxIterations: 10    40    90
-icp_params_loopclosure.thresholdDist: 30.0  5.0  0.50  # [meters]
-icp_params_loopclosure.thresholdAng:   2.0  0.5  0.01  # [deg]
+icp_settings_loop_closure: $include{$(mola-dir mola-fe-lidar)/params/icp-settings-loop-closure.yaml}
+
 # visualization:
 viz_decor_decimation: 5
 viz_decor_pointsize: 2.0
+
 # -----------------------------------------------------
 # DEBUG: Save all ICP pairings as 3Dscene files, for visual inspection
 # Warning: this can consume a *huge* disk space

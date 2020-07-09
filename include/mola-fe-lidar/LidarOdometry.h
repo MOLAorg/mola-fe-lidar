@@ -17,6 +17,7 @@
 #include <mp2p_icp/ICP_Base.h>
 #include <mrpt/graphs/CNetworkOfPoses.h>
 #include <mrpt/maps/CPointsMap.h>
+
 #include <mutex>
 
 namespace mola
@@ -39,6 +40,13 @@ class LidarOdometry : public FrontEndBase
 
     /** Re-initializes the front-end */
     void reset();
+
+    enum class AlignKind : uint8_t
+    {
+        LidarOdometry,
+        NearbyAlign,
+        LoopClosure
+    };
 
     struct Parameters
     {
@@ -84,14 +92,17 @@ class LidarOdometry : public FrontEndBase
 
         unsigned int max_KFs_local_graph{50000};
 
-        std::string icp_class{"undefined"};
-
         /** ICP parameters for the case of having, or not, a good velocity
          * model that works a good prior. Each entry in the vector is an
          * "ICP stage", to be run as a sequence of coarser to finer detail
          */
-        std::vector<mp2p_icp::Parameters> icp_params_with_vel,
-            icp_params_without_vel, icp_params_loopclosure;
+        struct ICP_case
+        {
+            mp2p_icp::ICP_Base::Ptr icp;
+            mp2p_icp::Parameters    icpParameters;
+        };
+
+        std::map<AlignKind, ICP_case> icp;
 
         /** Generate render visualization decoration for every N keyframes */
         int   viz_decor_decimation{5};
@@ -107,13 +118,6 @@ class LidarOdometry : public FrontEndBase
 
     using topological_dist_t = std::size_t;
 
-    enum class AlignKind : uint8_t
-    {
-        LidarOdometry,
-        NearbyAlign,
-        LoopClosure
-    };
-
     struct ICP_Input
     {
         using Ptr = std::shared_ptr<ICP_Input>;
@@ -123,8 +127,7 @@ class LidarOdometry : public FrontEndBase
         id_t                        from_id{mola::INVALID_ID};
         mp2p_icp::pointcloud_t::Ptr to_pc, from_pc;
         mrpt::math::TPose3D         init_guess_to_wrt_from;
-
-        std::vector<mp2p_icp::Parameters> icp_params;
+        mp2p_icp::Parameters        icp_params;
 
         /** used to identity where does this request come from */
         std::string debug_str;

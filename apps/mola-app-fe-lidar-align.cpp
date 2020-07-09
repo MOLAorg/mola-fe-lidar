@@ -24,6 +24,7 @@
 #include <mrpt/system/CTimeLogger.h>
 #include <mrpt/system/filesystem.h>
 #include <yaml-cpp/yaml.h>
+
 #include <iostream>
 
 // Declare supported cli switches ===========
@@ -160,20 +161,18 @@ void do_scan_align_test()
     switch (arg_icp_params_set.getValue())
     {
         case 0:
-            icp_in.icp_params = module.params_.icp_params_with_vel;
             icp_in.align_kind = mola::LidarOdometry::AlignKind::LidarOdometry;
             break;
         case 1:
-            icp_in.icp_params = module.params_.icp_params_without_vel;
             icp_in.align_kind = mola::LidarOdometry::AlignKind::NearbyAlign;
             break;
         case 2:
-            icp_in.icp_params = module.params_.icp_params_loopclosure;
             icp_in.align_kind = mola::LidarOdometry::AlignKind::LoopClosure;
             break;
         default:
             throw std::invalid_argument("icp-params-set: invalid value.");
     }
+    icp_in.icp_params = module.params_.icp.at(icp_in.align_kind).icpParameters;
 
     // Set initial guess:
     icp_in.init_guess_to_wrt_from.fromString(arg_init_pose.getValue());

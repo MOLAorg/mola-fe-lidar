@@ -18,6 +18,7 @@
 
 #include <mola-fe-lidar/LidarOdometry.h>
 #include <mola-kernel/yaml_helpers.h>
+#include <mola-lidar-segmentation/LidarFilterBase.h>
 #include <mrpt/config/CConfigFileMemory.h>
 #include <mrpt/core/initializer.h>
 #include <mrpt/maps/CColouredPointsMap.h>
@@ -35,9 +36,6 @@
 #include <mrpt/system/filesystem.h>
 #include <mrpt/system/string_utils.h>
 #include <yaml-cpp/yaml.h>
-
-MRPT_TODO("Remove: replace by factory from Yaml parameters");
-#include <mola-lidar-segmentation/FilterEdgesPlanes.h>
 
 using namespace mola;
 
@@ -58,45 +56,33 @@ MRPT_INITIALIZER(do_register_LidarOdometry)
 LidarOdometry::LidarOdometry() = default;
 
 static void load_icp_set_of_params(
-    std::vector<mp2p_icp::Parameters>& out, YAML::Node& cfg,
-    const std::string& prefix)
+    LidarOdometry::Parameters::ICP_case& out, const YAML::Node& cfg)
 {
     using namespace std::string_literals;
 
-    std::string sName = prefix + "maxIterations"s;
-    ASSERTMSG_(cfg[sName], "Missing YAML required entry: `"s + sName + "`"s);
-    std::string maxIterations = cfg[sName].as<std::string>("");
+    std::string icp_class;
+    YAML_LOAD_REQ(icp_class, std::string);
 
-    sName = prefix + "thresholdDist"s;
-    ASSERTMSG_(cfg[sName], "Missing YAML required entry: `"s + sName + "`"s);
-    std::string thresholdDists = cfg[sName].as<std::string>("");
+    // Test that the class factory works.
+    auto ptrNew = mrpt::rtti::classFactory(icp_class);
 
-    sName = prefix + "thresholdAng"s;
-    ASSERTMSG_(cfg[sName], "Missing YAML required entry: `"s + sName + "`"s);
-    std::string thresholdAngs = cfg[sName].as<std::string>("");
+    out.icp = mrpt::ptr_cast<mp2p_icp::ICP_Base>::from(ptrNew);
 
-    // Vector -> values:
-    std::vector<std::string> maxIterations_vals;
-    mrpt::system::tokenize(maxIterations, " ,", maxIterations_vals);
+    if (!out.icp)
+        THROW_EXCEPTION_FMT(
+            "icp_class=`%s` is a non-registered or incompatible class. Please, "
+            "run: `mola-cli --rtti-children-of mp2p_icp::ICP_Base` to see the "
+            "list of known classes.",
+            icp_class.c_str());
 
-    std::vector<std::string> thresholdDists_vals;
-    mrpt::system::tokenize(thresholdDists, " ,", thresholdDists_vals);
+    out.icpParameters.load_from(
+        mrpt::containers::Parameters::FromYAML(cfg["params"]));
 
-    std::vector<std::string> thresholdAngs_vals;
-    mrpt::system::tokenize(thresholdAngs, " ,", thresholdAngs_vals);
+    out.icp->initializeMatchers(
+        mrpt::containers::Parameters::FromYAML(cfg["matchers"]));
 
-    ASSERT_(maxIterations_vals.size() >= 1);
-    ASSERT_(maxIterations_vals.size() == thresholdDists_vals.size());
-    ASSERT_(maxIterations_vals.size() == thresholdAngs_vals.size());
-
-    const size_t n = thresholdAngs_vals.size();
-    out.resize(n);
-    for (size_t i = 0; i < n; i++)
-    {
-        out[i].maxIterations = std::stoul(maxIterations_vals[i]);
-        out[i].thresholdDist = std::stod(thresholdDists_vals[i]);
-        out[i].thresholdAng  = mrpt::DEG2RAD(std::stod(thresholdAngs_vals[i]));
-    }
+    out.icp->initializeQualityEvaluator(
+        mrpt::containers::Parameters::FromYAML(cfg["quality"]));
 }
 
 void LidarOdometry::initialize(const std::string& cfg_block)
@@ -133,12 +119,13 @@ void LidarOdometry::initialize(const std::string& cfg_block)
     YAML_LOAD_OPT(params_, viz_decor_decimation, int);
     YAML_LOAD_OPT(params_, viz_decor_pointsize, float);
 
+    ENSURE_YAML_ENTRY_EXISTS(cfg, "icp_settings_with_vel");
     load_icp_set_of_params(
-        params_.icp_params_with_vel, cfg, "icp_params_with_vel.");
+        params_.icp[AlignKind::LidarOdometry], cfg["icp_settings_with_vel"]);
     load_icp_set_of_params(
-        params_.icp_params_without_vel, cfg, "icp_params_without_vel.");
+        params_.icp[AlignKind::NearbyAlign], cfg["icp_settings_without_vel"]);
     load_icp_set_of_params(
-        params_.icp_params_loopclosure, cfg, "icp_params_loopclosure.");
+        params_.icp[AlignKind::LoopClosure], cfg["icp_settings_loop_closure"]);
 
     YAML_LOAD_OPT(params_, debug_save_lidar_odometry, bool);
     YAML_LOAD_OPT(params_, debug_save_extra_edges, bool);
@@ -173,25 +160,6 @@ void LidarOdometry::initialize(const std::string& cfg_block)
 
         // Initialize with YAML-based parameters:
         state_.pc_filter->initialize(mola::yaml2string(pc_params));
-    }
-
-    // Create ICP algorithm:
-    {
-        YAML_LOAD_REQ(params_, icp_class, std::string);
-
-        // Test that the class factory works. We will generate a new object
-        // for each ICP job later on.
-        auto ptrNew = mrpt::rtti::classFactory(params_.icp_class);
-        mp2p_icp::ICP_Base::Ptr obj =
-            mrpt::ptr_cast<mp2p_icp::ICP_Base>::from(ptrNew);
-
-        if (!state_.pc_filter)
-            THROW_EXCEPTION_FMT(
-                "icp_class=`%s` is a non-registered or "
-                "incompatible class. Please, run: "
-                "`mola-cli --rtti-children-of mp2p_icp::ICP_Base` to see the "
-                "list of known classes.",
-                params_.icp_class.c_str());
     }
 
     // attach to world model, if present:
@@ -335,9 +303,10 @@ void LidarOdometry::doProcessNewObservation(CObservation::Ptr& o)
 
             // If we don't have a valid twist estimation, use a larger ICP
             // correspondence threshold:
-            icp_in.icp_params = state_.last_iter_twist_is_good
-                                    ? params_.icp_params_with_vel
-                                    : params_.icp_params_without_vel;
+            icp_in.icp_params =
+                state_.last_iter_twist_is_good
+                    ? params_.icp[AlignKind::LidarOdometry].icpParameters
+                    : params_.icp[AlignKind::NearbyAlign].icpParameters;
 
             profiler_.leave("doProcessNewObservation.2c.prepare_icp_in");
 
@@ -732,7 +701,7 @@ void LidarOdometry::checkForNearbyKFs()
                 // Regular, nearby KF-to-KF ICP check:
                 d->align_kind = AlignKind::NearbyAlign;
                 d->debug_str  = "extra_edge"s;
-                d->icp_params = params_.icp_params_with_vel;
+                d->icp_params = params_.icp[d->align_kind].icpParameters;
 
                 nearby_checks.emplace_back(std::move(d));
             }
@@ -741,7 +710,7 @@ void LidarOdometry::checkForNearbyKFs()
                 // Attempt to close a loop:
                 d->align_kind = AlignKind::LoopClosure;
                 d->debug_str  = "loop_closure"s;
-                d->icp_params = params_.icp_params_loopclosure;
+                d->icp_params = params_.icp[d->align_kind].icpParameters;
 
                 loop_closure_checks[kf_eucl_dist] = std::move(d);
             }
@@ -908,8 +877,6 @@ void LidarOdometry::run_one_icp(const ICP_Input& in, ICP_Output& out)
     {
         ProfilerEntry tle(profiler_, "run_one_icp");
 
-        ASSERT_(!in.icp_params.empty());
-
         size_t largest_pc_count = 1;
 
         ASSERT_(in.from_pc);
@@ -928,45 +895,32 @@ void LidarOdometry::run_one_icp(const ICP_Input& in, ICP_Output& out)
 
         mrpt::math::TPose3D current_solution = in.init_guess_to_wrt_from;
 
-        for (unsigned int stage = 0; stage < in.icp_params.size(); stage++)
+        mp2p_icp::Results icp_result;
+
+        MRPT_LOG_DEBUG_STREAM(
+            "MRPT ICP: max point count=" << largest_pc_count
+                                         << " decimation=" << decim);
+
+        params_.icp.at(in.align_kind)
+            .icp->align(
+                pcs_from, pcs_to, current_solution, in.icp_params, icp_result);
+
+        if (icp_result.quality > 0)
         {
-            mp2p_icp::Results icp_result;
-
-            MRPT_LOG_DEBUG_STREAM(
-                "MRPT ICP: max point count=" << largest_pc_count
-                                             << " decimation=" << decim);
-
-            auto icp_params = in.icp_params[stage];
-
-            icp_params.weight_pt2pt_layers.clear();
-            icp_params.weight_pt2pt_layers["edge_points"s]  = 1.0;
-            icp_params.weight_pt2pt_layers["plane_points"s] = 1.0;
-            icp_params.weight_pt2pt_layers["full_decim"s]   = 0.5;
-
-            auto ptrNew = mrpt::rtti::classFactory(params_.icp_class);
-            auto icp    = mrpt::ptr_cast<mp2p_icp::ICP_Base>::from(ptrNew);
-            ASSERT_(icp);
-
-            icp->align(
-                pcs_from, pcs_to, current_solution, icp_params, icp_result);
-
-            if (icp_result.goodness > 0)
-            {
-                // Keep as init value for next stage:
-                current_solution = icp_result.optimal_tf.mean.asTPose();
-            }
-
-            out.found_pose_to_wrt_from = icp_result.optimal_tf;
-            out.goodness               = icp_result.goodness;
-
-            MRPT_LOG_DEBUG_FMT(
-                "ICP stage #%u (kind=%u): goodness=%.03f iters=%u rel_pose=%s "
-                "termReason=%u",
-                stage, static_cast<unsigned int>(in.align_kind), out.goodness,
-                static_cast<unsigned int>(icp_result.nIterations),
-                out.found_pose_to_wrt_from.getMeanVal().asString().c_str(),
-                static_cast<unsigned int>(icp_result.terminationReason));
+            // Keep as init value for next stage:
+            current_solution = icp_result.optimal_tf.mean.asTPose();
         }
+
+        out.found_pose_to_wrt_from = icp_result.optimal_tf;
+        out.goodness               = icp_result.quality;
+
+        MRPT_LOG_DEBUG_FMT(
+            "ICP (kind=%u): goodness=%.03f iters=%u rel_pose=%s "
+            "termReason=%u",
+            static_cast<unsigned int>(in.align_kind), out.goodness,
+            static_cast<unsigned int>(icp_result.nIterations),
+            out.found_pose_to_wrt_from.getMeanVal().asString().c_str(),
+            static_cast<unsigned int>(icp_result.terminationReason));
 
         // Check quality of match:
         MRPT_TODO("Impl. finite differences based Hessian check");
