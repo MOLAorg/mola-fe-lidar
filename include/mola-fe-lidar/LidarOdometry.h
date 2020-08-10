@@ -14,7 +14,7 @@
 #include <mola-kernel/WorkerThreadsPool.h>
 #include <mola-kernel/interfaces/FrontEndBase.h>
 #include <mola-lidar-segmentation/LidarFilterBase.h>
-#include <mp2p_icp/ICP_Base.h>
+#include <mp2p_icp/ICP.h>
 #include <mrpt/graphs/CNetworkOfPoses.h>
 #include <mrpt/maps/CPointsMap.h>
 
@@ -98,8 +98,8 @@ class LidarOdometry : public FrontEndBase
          */
         struct ICP_case
         {
-            mp2p_icp::ICP_Base::Ptr icp;
-            mp2p_icp::Parameters    icpParameters;
+            mp2p_icp::ICP::Ptr   icp;
+            mp2p_icp::Parameters icpParameters;
         };
 
         std::map<AlignKind, ICP_case> icp;

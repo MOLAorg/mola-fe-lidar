@@ -66,7 +66,7 @@ static void load_icp_set_of_params(
     // Test that the class factory works.
     auto ptrNew = mrpt::rtti::classFactory(icp_class);
 
-    out.icp = mrpt::ptr_cast<mp2p_icp::ICP_Base>::from(ptrNew);
+    out.icp = mrpt::ptr_cast<mp2p_icp::ICP>::from(ptrNew);
 
     if (!out.icp)
         THROW_EXCEPTION_FMT(
@@ -75,13 +75,20 @@ static void load_icp_set_of_params(
             "list of known classes.",
             icp_class.c_str());
 
+    ENSURE_YAML_ENTRY_EXISTS(cfg, "params");
     out.icpParameters.load_from(
         mrpt::containers::Parameters::FromYAML(cfg["params"]));
 
-    out.icp->initializeMatchers(
+    ENSURE_YAML_ENTRY_EXISTS(cfg, "solvers");
+    out.icp->initialize_solvers(
+        mrpt::containers::Parameters::FromYAML(cfg["solvers"]));
+
+    ENSURE_YAML_ENTRY_EXISTS(cfg, "matchers");
+    out.icp->initialize_matchers(
         mrpt::containers::Parameters::FromYAML(cfg["matchers"]));
 
-    out.icp->initializeQualityEvaluator(
+    ENSURE_YAML_ENTRY_EXISTS(cfg, "quality");
+    out.icp->initialize_quality_evaluators(
         mrpt::containers::Parameters::FromYAML(cfg["quality"]));
 }
 
