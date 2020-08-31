@@ -20,6 +20,7 @@
 #include <mola-kernel/yaml_helpers.h>
 #include <mola-lidar-segmentation/LidarFilterBase.h>
 #include <mrpt/config/CConfigFileMemory.h>
+#include <mrpt/containers/yaml.h>
 #include <mrpt/core/initializer.h>
 #include <mrpt/maps/CColouredPointsMap.h>
 #include <mrpt/obs/CObservationComment.h>
@@ -35,7 +36,6 @@
 #include <mrpt/system/datetime.h>
 #include <mrpt/system/filesystem.h>
 #include <mrpt/system/string_utils.h>
-#include <yaml-cpp/yaml.h>
 
 using namespace mola;
 
@@ -56,7 +56,7 @@ MRPT_INITIALIZER(do_register_LidarOdometry)
 LidarOdometry::LidarOdometry() = default;
 
 static void load_icp_set_of_params(
-    LidarOdometry::Parameters::ICP_case& out, const YAML::Node& cfg)
+    LidarOdometry::Parameters::ICP_case& out, const mrpt::containers::yaml& cfg)
 {
     using namespace std::string_literals;
 
@@ -76,20 +76,16 @@ static void load_icp_set_of_params(
             icp_class.c_str());
 
     ENSURE_YAML_ENTRY_EXISTS(cfg, "params");
-    out.icpParameters.load_from(
-        mrpt::containers::Parameters::FromYAML(cfg["params"]));
+    out.icpParameters.load_from(cfg["params"]);
 
     ENSURE_YAML_ENTRY_EXISTS(cfg, "solvers");
-    out.icp->initialize_solvers(
-        mrpt::containers::Parameters::FromYAML(cfg["solvers"]));
+    out.icp->initialize_solvers(cfg["solvers"]);
 
     ENSURE_YAML_ENTRY_EXISTS(cfg, "matchers");
-    out.icp->initialize_matchers(
-        mrpt::containers::Parameters::FromYAML(cfg["matchers"]));
+    out.icp->initialize_matchers(cfg["matchers"]);
 
     ENSURE_YAML_ENTRY_EXISTS(cfg, "quality");
-    out.icp->initialize_quality_evaluators(
-        mrpt::containers::Parameters::FromYAML(cfg["quality"]));
+    out.icp->initialize_quality_evaluators(cfg["quality"]);
 }
 
 void LidarOdometry::initialize(const std::string& cfg_block)
@@ -104,7 +100,7 @@ void LidarOdometry::initialize(const std::string& cfg_block)
                                           << " (determined automatically)");
 
     // Load params:
-    auto c   = YAML::Load(cfg_block);
+    auto c   = mrpt::containers::yaml::FromText(cfg_block);
     auto cfg = c["params"];
     MRPT_LOG_DEBUG_STREAM("Loading these params:\n" << cfg);
 

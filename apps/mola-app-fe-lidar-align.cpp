@@ -23,7 +23,7 @@
 #include <mrpt/opengl/stock_objects.h>
 #include <mrpt/system/CTimeLogger.h>
 #include <mrpt/system/filesystem.h>
-#include <yaml-cpp/yaml.h>
+#include <mrpt/containers/yaml.h>
 
 #include <iostream>
 
@@ -118,7 +118,7 @@ void do_scan_align_test()
     ASSERT_FILE_EXISTS_(cfg_file);
 
     std::cout << "Loading param file: " << cfg_file << "\n";
-    const auto cfg = YAML::LoadFile(cfg_file);
+    const auto cfg = mrpt::containers::yaml::FromFile(cfg_file);
     std::cout << "Done.\n";
     std::string str_params = mola::yaml2string(cfg);
     std::cout << "Initializing with these params:\n" << str_params << "\n";
