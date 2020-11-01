@@ -32,11 +32,17 @@ mola_add_library(
 	TARGET ${PROJECT_NAME}
 	SOURCES ${LIB_SRCS} ${LIB_PUBLIC_HDRS}
 	PUBLIC_LINK_LIBRARIES
-	mola-lidar-segmentation
-	mp2p_icp
+		mola-lidar-segmentation
+		mp2p_icp
 		mola-kernel
 		mrpt::graphs
 		mrpt::slam
+	CMAKE_DEPENDENCIES
+		mola-lidar-segmentation
+		mp2p_icp
+		mola-kernel
+		mrpt-graphs
+		mrpt-slam
 )
 
 # ----------------------
