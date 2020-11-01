@@ -51,10 +51,9 @@ mola_add_executable(
 	TARGET  mola-app-fe-lidar-align
 	SOURCES apps/mola-app-fe-lidar-align.cpp
 	LINK_LIBRARIES
-	mola-lidar-segmentation
-	mp2p_icp
+		mola-lidar-segmentation
+		mp2p_icp
 		mrpt::tclap
 		mrpt::gui
-		yaml-cpp
 		${PROJECT_NAME}
 )
