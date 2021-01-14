@@ -17,7 +17,7 @@
  */
 
 #include <mola-fe-lidar/LidarOdometry.h>
-#include <mola-kernel/yaml_helpers.h>
+#include <mola-yaml/yaml_helpers.h>
 #include <mola-lidar-segmentation/LidarFilterBase.h>
 #include <mrpt/config/CConfigFileMemory.h>
 #include <mrpt/containers/yaml.h>

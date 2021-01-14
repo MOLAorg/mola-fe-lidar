@@ -2,7 +2,7 @@
 #        A Modular Optimization framework for Localization and mApping
 #                               (MOLA)
 #
-# Copyright (C) 2018-2019, Jose Luis Blanco-Claraco, contributors (AUTHORS.md)
+# Copyright (C) 2018-2021, Jose Luis Blanco-Claraco, contributors (AUTHORS.md)
 # All rights reserved.
 # Released under GNU GPL v3. See LICENSE file
 # ------------------------------------------------------------------------------
@@ -17,7 +17,7 @@ project(mola-fe-lidar LANGUAGES CXX)
 find_package(mola-common REQUIRED)
 
 # find dependencies:
-find_package(MRPT 1.9.9 REQUIRED COMPONENTS slam graphs gui tclap)
+find_package(MRPT 2.1.0 REQUIRED COMPONENTS slam graphs gui tclap)
 
 find_mola_package(mola-kernel REQUIRED)
 find_mola_package(mola-lidar-segmentation REQUIRED)

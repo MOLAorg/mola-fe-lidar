@@ -12,7 +12,7 @@
  */
 
 #include <mola-fe-lidar/LidarOdometry.h>
-#include <mola-kernel/yaml_helpers.h>
+#include <mola-yaml/yaml_helpers.h>
 #include <mola-lidar-segmentation/FilterEdgesPlanes.h>
 #include <mrpt/3rdparty/tclap/CmdLine.h>
 #include <mrpt/core/exceptions.h>
