@@ -12,9 +12,10 @@
  */
 
 #include <mola-fe-lidar/LidarOdometry.h>
-#include <mola-yaml/yaml_helpers.h>
 #include <mola-lidar-segmentation/FilterEdgesPlanes.h>
+#include <mola-yaml/yaml_helpers.h>
 #include <mrpt/3rdparty/tclap/CmdLine.h>
+#include <mrpt/containers/yaml.h>
 #include <mrpt/core/exceptions.h>
 #include <mrpt/gui/CDisplayWindow3D.h>
 #include <mrpt/maps/CPointsMapXYZI.h>
@@ -23,7 +24,6 @@
 #include <mrpt/opengl/stock_objects.h>
 #include <mrpt/system/CTimeLogger.h>
 #include <mrpt/system/filesystem.h>
-#include <mrpt/containers/yaml.h>
 
 #include <iostream>
 
@@ -268,25 +268,25 @@ void do_scan_align_test()
 
         {
             mp2p_icp::render_params_t pl1_render;
-            pl1_render.plane_color = mrpt::img::TColor(0xff, 0x00, 0x00);
-            pl1_render.plane_half_width =
+            pl1_render.planes.color = mrpt::img::TColor(0xff, 0x00, 0x00);
+            pl1_render.planes.halfWidth =
                 module.params_.voxel_filter_resolution * 0.5f;
-            pl1_render.plane_grid_spacing = pl1_render.plane_half_width * 0.45f;
+            pl1_render.planes.gridSpacing = pl1_render.planes.halfWidth * 0.45f;
 
             auto gl_planes1 = mrpt::opengl::CSetOfObjects::Create();
-            pcs1->planesAsRenderizable(*gl_planes1, pl1_render);
+            pcs1->get_visualization_planes(*gl_planes1, pl1_render.planes);
             scene->insert(gl_planes1);
         }
 
         {
             mp2p_icp::render_params_t pl2_render;
-            pl2_render.plane_color = mrpt::img::TColor(0x00, 0x00, 0xff);
-            pl2_render.plane_half_width =
+            pl2_render.planes.color = mrpt::img::TColor(0x00, 0x00, 0xff);
+            pl2_render.planes.halfWidth =
                 module.params_.voxel_filter_resolution * 0.5f;
-            pl2_render.plane_grid_spacing = pl2_render.plane_half_width * 0.45f;
+            pl2_render.planes.gridSpacing = pl2_render.planes.halfWidth * 0.45f;
 
             auto gl_planes2 = mrpt::opengl::CSetOfObjects::Create();
-            pcs2->planesAsRenderizable(*gl_planes2, pl2_render);
+            pcs2->get_visualization_planes(*gl_planes2, pl2_render.planes);
             gl_planes2->setPose(icp_out.found_pose_to_wrt_from.mean);
             scene->insert(gl_planes2);
         }
