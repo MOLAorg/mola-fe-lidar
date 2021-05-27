@@ -1,6 +1,6 @@
 /* -------------------------------------------------------------------------
  *   A Modular Optimization framework for Localization and mApping  (MOLA)
- * Copyright (C) 2018-2019 Jose Luis Blanco, University of Almeria
+ * Copyright (C) 2018-2021 Jose Luis Blanco, University of Almeria
  * See LICENSE for license information.
  * ------------------------------------------------------------------------- */
 /**
@@ -162,7 +162,7 @@ void LidarOdometry::initialize(const std::string& cfg_block)
         state_.pc_filter->setMinLoggingLevel(this->getMinLoggingLevel());
 
         // Initialize with YAML-based parameters:
-        state_.pc_filter->initialize(mola::yaml2string(pc_params));
+        state_.pc_filter->initialize(mola::yaml_to_string(pc_params));
     }
 
     // attach to world model, if present:

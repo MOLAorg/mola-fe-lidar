@@ -1,6 +1,6 @@
 /* -------------------------------------------------------------------------
  *   A Modular Optimization framework for Localization and mApping  (MOLA)
- * Copyright (C) 2018-2019 Jose Luis Blanco, University of Almeria
+ * Copyright (C) 2018-2021 Jose Luis Blanco, University of Almeria
  * See LICENSE for license information.
  * ------------------------------------------------------------------------- */
 
@@ -120,7 +120,7 @@ void do_scan_align_test()
     std::cout << "Loading param file: " << cfg_file << "\n";
     const auto cfg = mrpt::containers::yaml::FromFile(cfg_file);
     std::cout << "Done.\n";
-    std::string str_params = mola::yaml2string(cfg);
+    std::string str_params = mola::yaml_to_string(cfg);
     std::cout << "Initializing with these params:\n" << str_params << "\n";
 
     mola::LidarOdometry module;
