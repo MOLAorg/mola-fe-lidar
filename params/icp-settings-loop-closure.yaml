@@ -1,16 +1,15 @@
 # File to be $include{}'d into the param block of other high-level SLAM files.
 
 # Instantiate one of the ICP algorithms.
-# See available methods with:
-#  mola-cli --rtti-children-of mp2p_icp::ICP_Base
+# Available methods are `mp2p_icp::ICP` and those listed with:
+#  mola-cli --rtti-children-of mp2p_icp::ICP
 #
-icp_class: mp2p_icp::ICP_Horn_MultiCloud
+icp_class: mp2p_icp::ICP
 
 # See: mp2p_icp::Parameter
 params:
-  maxIterations: 50
-  maxPairsPerLayer: 500
-  minAbsStep_trans: 1e-5
+  maxIterations: 100
+  minAbsStep_trans: 5e-5
   minAbsStep_rot: 1e-5
   pairingsWeightParameters:
     # scale-based outlier detector
@@ -21,18 +20,28 @@ params:
     robust_kernel_param: 0.1 # [degrees]
     robust_kernel_scale: 400.0
 
+solvers:
+  - class: mp2p_icp::Solver_GaussNewton
+    params:
+      maxIterations: 20
+
 # Sequence of one or more pairs (class, params) defining mp2p_icp::Matcher instances
 # to pair geometric entities between pointclouds.
 # See available methods with:
 #  mola-cli --rtti-children-of mp2p_icp::Matcher
 matchers:
-  - class: mp2p_icp::Matcher_Points_DistanceThreshold
+  - class: mp2p_icp::Matcher_Point2Plane
     params:
-      threshold: 10.0
+      distanceThreshold: 0.70
+      planeEigenThreshold: 0.07
+      knn: 6
+      runFromIteration: 0
+      runUpToIteration: 0
 
 # See available methods with:
 #  mola-cli --rtti-children-of mp2p_icp::QualityEvaluator
 quality:
-  class: mp2p_icp::QualityEvaluator_PairedRatio
-  params:
-    # (none)
+  - class: mp2p_icp::QualityEvaluator_PairedRatio
+    params:
+     thresholdDistance: 0.10
+
