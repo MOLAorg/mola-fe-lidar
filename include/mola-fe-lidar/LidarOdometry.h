@@ -11,10 +11,10 @@
  */
 #pragma once
 
-#include <mrpt/core/WorkerThreadsPool.h>
 #include <mola-kernel/interfaces/FrontEndBase.h>
 #include <mola-lidar-segmentation/LidarFilterBase.h>
 #include <mp2p_icp/ICP.h>
+#include <mrpt/core/WorkerThreadsPool.h>
 #include <mrpt/graphs/CNetworkOfPoses.h>
 #include <mrpt/maps/CPointsMap.h>
 
@@ -169,10 +169,12 @@ class LidarOdometry : public FrontEndBase
 
    private:
     /** The worker thread pool with 1 thread for processing incomming scans */
-    mrpt::WorkerThreadsPool worker_pool_{1};
+    mrpt::WorkerThreadsPool worker_pool_{
+        1, mrpt::WorkerThreadsPool::POLICY_FIFO, "worker_pool"};
 
     /** Worker thread to align a new KF against past KFs:*/
-    mrpt::WorkerThreadsPool worker_pool_past_KFs_{1};
+    mrpt::WorkerThreadsPool worker_pool_past_KFs_{
+        1, mrpt::WorkerThreadsPool::POLICY_FIFO, "worker_pool_past_KFs"};
 
     MethodState     state_;
     WorldModel::Ptr worldmodel_;
