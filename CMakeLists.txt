@@ -20,8 +20,8 @@ find_package(mola-common REQUIRED)
 find_package(MRPT 2.1.0 REQUIRED COMPONENTS slam graphs gui tclap)
 
 find_mola_package(mola-kernel REQUIRED)
-find_mola_package(mola-lidar-segmentation REQUIRED)
 find_mola_package(mp2p_icp REQUIRED)
+find_mola_package(mp2p_icp_filters REQUIRED)
 
 # -----------------------
 # define lib:
@@ -32,28 +32,15 @@ mola_add_library(
 	TARGET ${PROJECT_NAME}
 	SOURCES ${LIB_SRCS} ${LIB_PUBLIC_HDRS}
 	PUBLIC_LINK_LIBRARIES
-		mola-lidar-segmentation
 		mp2p_icp
+		mp2p_icp_filters
 		mola-kernel
 		mrpt::graphs
 		mrpt::slam
 	CMAKE_DEPENDENCIES
-		mola-lidar-segmentation
 		mp2p_icp
+		mp2p_icp_filters
 		mola-kernel
 		mrpt-graphs
 		mrpt-slam
-)
-
-# ----------------------
-# define app targets:
-mola_add_executable(
-	TARGET  mola-app-fe-lidar-align
-	SOURCES apps/mola-app-fe-lidar-align.cpp
-	LINK_LIBRARIES
-		mola-lidar-segmentation
-		mp2p_icp
-		mrpt::tclap
-		mrpt::gui
-		${PROJECT_NAME}
 )

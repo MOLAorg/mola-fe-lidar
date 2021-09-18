@@ -12,8 +12,9 @@
 #pragma once
 
 #include <mola-kernel/interfaces/FrontEndBase.h>
-#include <mola-lidar-segmentation/LidarFilterBase.h>
 #include <mp2p_icp/ICP.h>
+#include <mp2p_icp_filters/FilterBase.h>
+#include <mp2p_icp_filters/Generator.h>
 #include <mrpt/core/WorkerThreadsPool.h>
 #include <mrpt/graphs/CNetworkOfPoses.h>
 #include <mrpt/maps/CPointsMap.h>
@@ -142,13 +143,15 @@ class LidarOdometry : public FrontEndBase
     /** All variables that hold the algorithm state */
     struct MethodState
     {
-        mrpt::Clock::time_point                  last_obs_tim{};
-        mp2p_icp::pointcloud_t::Ptr              last_points{};
-        mrpt::math::TTwist3D                     last_iter_twist;
-        bool                                     last_iter_twist_is_good{false};
-        id_t                                     last_kf{mola::INVALID_ID};
-        mrpt::poses::CPose3D                     accum_since_last_kf{};
-        lidar_segmentation::LidarFilterBase::Ptr pc_filter;
+        mrpt::Clock::time_point     last_obs_tim{};
+        mp2p_icp::pointcloud_t::Ptr last_points{};
+        mrpt::math::TTwist3D        last_iter_twist;
+        bool                        last_iter_twist_is_good{false};
+        id_t                        last_kf{mola::INVALID_ID};
+        mrpt::poses::CPose3D        accum_since_last_kf{};
+
+        mp2p_icp_filters::GeneratorSet   pc_generators;
+        mp2p_icp_filters::FilterPipeline pc_filter;
 
         // An auxiliary (local) pose-graph to use Dijkstra and find guesses
         // for ICP against nearby past KFs:

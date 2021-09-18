@@ -18,7 +18,6 @@
 
 #include <mola-fe-lidar/LidarOdometry.h>
 #include <mola-yaml/yaml_helpers.h>
-#include <mola-lidar-segmentation/LidarFilterBase.h>
 #include <mrpt/config/CConfigFileMemory.h>
 #include <mrpt/containers/yaml.h>
 #include <mrpt/core/initializer.h>
@@ -138,31 +137,13 @@ void LidarOdometry::initialize(const std::string& cfg_block)
     {
         ProfilerEntry tle(profiler_, "filterPointCloud_initialize");
 
-        std::string pointcloud_filter_class;
-        YAML_LOAD_REQ(pointcloud_filter_class, std::string);
+        // Create, and copy my own verbosity level:
+        state_.pc_generators = mp2p_icp_filters::generators_from_yaml(
+            cfg["pointcloud_generator"], this->getMinLoggingLevel());
 
-        ENSURE_YAML_ENTRY_EXISTS(cfg, "pointcloud_filter_params");
-        auto pc_params = cfg["pointcloud_filter_params"];
-
-        // Class factory:
-        auto ptrNew = mrpt::rtti::classFactory(pointcloud_filter_class);
-        state_.pc_filter =
-            mrpt::ptr_cast<lidar_segmentation::LidarFilterBase>::from(ptrNew);
-
-        if (!state_.pc_filter)
-            THROW_EXCEPTION_FMT(
-                "pointcloud_filter_class=`%s` is a non-registered or "
-                "incompatible class. Please, run: "
-                "`mola-cli --rtti-children-of "
-                "mola::lidar_segmentation::LidarFilterBase`"
-                "to see the list of known classes.",
-                pointcloud_filter_class.c_str());
-
-        // Same verbosity level:
-        state_.pc_filter->setMinLoggingLevel(this->getMinLoggingLevel());
-
-        // Initialize with YAML-based parameters:
-        state_.pc_filter->initialize(mola::yaml_to_string(pc_params));
+        // Create, and copy my own verbosity level:
+        state_.pc_filter = mp2p_icp_filters::filter_pipeline_from_yaml(
+            cfg["pointcloud_filter"], this->getMinLoggingLevel());
     }
 
     // attach to world model, if present:
@@ -205,7 +186,8 @@ void LidarOdometry::onNewObservation(CObservation::Ptr& o)
     profiler_.enter("delay_onNewObs_to_process");
 
     // Enqueue task:
-    worker_pool_.enqueue(&LidarOdometry::doProcessNewObservation, this, o);
+    auto fut =
+        worker_pool_.enqueue(&LidarOdometry::doProcessNewObservation, this, o);
 
     MRPT_TRY_END
 }
@@ -237,13 +219,15 @@ void LidarOdometry::doProcessNewObservation(CObservation::Ptr& o)
 
         // Extract points from observation:
         auto this_obs_points = mp2p_icp::pointcloud_t::Create();
+        mp2p_icp_filters::apply_generators(
+            state_.pc_generators, *o, *this_obs_points);
 
         // Filter/segment the point cloud:
         ProfilerEntry tle1(
             profiler_, "doProcessNewObservation.1.filter_pointclouds");
 
-        // convert to variant:
-        state_.pc_filter->filter(o, *this_obs_points);
+        mp2p_icp_filters::apply_filter_pipeline(
+            state_.pc_filter, *this_obs_points);
 
         tle1.stop();
 
