@@ -87,7 +87,7 @@ static void load_icp_set_of_params(
     out.icp->initialize_quality_evaluators(cfg["quality"]);
 }
 
-void LidarOdometry::initialize(const std::string& cfg_block)
+void LidarOdometry::initialize(const Yaml& c)
 {
     MRPT_TRY_START
 
@@ -99,7 +99,6 @@ void LidarOdometry::initialize(const std::string& cfg_block)
                                           << " (determined automatically)");
 
     // Load params:
-    auto c   = mrpt::containers::yaml::FromText(cfg_block);
     auto cfg = c["params"];
     MRPT_LOG_DEBUG_STREAM("Loading these params:\n" << cfg);
 
