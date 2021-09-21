@@ -1,1 +1,2 @@
 build-dep: mola-kernel
+build-dep: mp2p_icp
