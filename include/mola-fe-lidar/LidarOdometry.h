@@ -72,10 +72,6 @@ class LidarOdometry : public FrontEndBase
         /** Minimum ICP quality for a loop closure to be accepted */
         double min_icp_goodness_lc{0.6};
 
-        /** If !=0, decimate point clouds so they do not have more than this
-         * number of points */
-        unsigned int decimate_to_point_count{500};
-
         /** Size of the voxel filter [meters] */
         unsigned int full_pointcloud_decimation{20};
         double       voxel_filter_resolution{.5};
@@ -108,10 +104,6 @@ class LidarOdometry : public FrontEndBase
         /** Generate render visualization decoration for every N keyframes */
         int   viz_decor_decimation{5};
         float viz_decor_pointsize{2.0f};
-
-        bool debug_save_lidar_odometry{false};
-        bool debug_save_extra_edges{false};
-        bool debug_save_loop_closures{false};
     };
 
     /** Algorithm parameters */
@@ -126,7 +118,7 @@ class LidarOdometry : public FrontEndBase
         AlignKind                   align_kind{AlignKind::LidarOdometry};
         id_t                        to_id{mola::INVALID_ID};
         id_t                        from_id{mola::INVALID_ID};
-        mp2p_icp::pointcloud_t::Ptr to_pc, from_pc;
+        mp2p_icp::metric_map_t::Ptr to_pc, from_pc;
         mrpt::math::TPose3D         init_guess_to_wrt_from;
         mp2p_icp::Parameters        icp_params;
 
@@ -144,7 +136,7 @@ class LidarOdometry : public FrontEndBase
     struct MethodState
     {
         mrpt::Clock::time_point     last_obs_tim{};
-        mp2p_icp::pointcloud_t::Ptr last_points{};
+        mp2p_icp::metric_map_t::Ptr last_points{};
         mrpt::math::TTwist3D        last_iter_twist;
         bool                        last_iter_twist_is_good{false};
         id_t                        last_kf{mola::INVALID_ID};
