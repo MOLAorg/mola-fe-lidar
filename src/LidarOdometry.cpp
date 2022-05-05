@@ -707,8 +707,8 @@ void LidarOdometry::checkForNearbyKFs()
         nNearbyChecks / params_.max_nearby_align_checks);
     for (size_t idx = 0; idx < nNearbyChecks; idx += nearbyCheckDecim)
     {
-        const auto& d = nearby_checks[idx];
-        worker_pool_past_KFs_.enqueue(
+        const auto& d      = nearby_checks[idx];
+        const auto  futRet = worker_pool_past_KFs_.enqueue(
             &LidarOdometry::doCheckForNonAdjacentKFs, this, d);
 
         {
@@ -724,9 +724,8 @@ void LidarOdometry::checkForNearbyKFs()
     // it *might* be the easiest one to align...)
     if (!loop_closure_checks.empty())
     {
-        const auto& d = loop_closure_checks.begin()->second;
-
-        worker_pool_past_KFs_.enqueue(
+        const auto& d      = loop_closure_checks.begin()->second;
+        const auto  futRet = worker_pool_past_KFs_.enqueue(
             &LidarOdometry::doCheckForNonAdjacentKFs, this, d);
 
         MRPT_LOG_WARN_STREAM(
